@@ -1,62 +1,97 @@
 import data_manager
+import pandas as pd
 
-def create_new_product():
-    """Интерфейс создания товара или комплекта."""
-    recipes = data_manager.load_json('recipes')
-    inventory = data_manager.load_json('inventory')
+def get_all_items():
+    """Загружает весь каталог (артикулы и их составы)"""
+    return data_manager.load_json('recipes')
 
-    print("\n--- МАСТЕР СОЗДАНИЯ ТОВАРА ---")
-    sku_name = input("Введите Артикул Продавца (как в Excel): ").strip()
+def get_item_content(sku):
+    """Возвращает состав артикула. Если там "SIMPLE" или строка — возвращает {}."""
+    catalog = data_manager.load_json('recipes')
+    item = catalog.get(sku, {})
     
-    if sku_name in recipes:
-        print("⚠️ Этот товар уже есть в базе! Перезапись.")
-
-    is_bundle = input("Это набор (комплект)? (д/н): ").lower()
-
-    if is_bundle != 'д':
-        # --- Логика для ПРОСТОГО товара ---
-        try:
-            qty = int(input(f"Текущий остаток '{sku_name}' на складе: "))
-            inventory[sku_name] = qty
-            recipes[sku_name] = "SIMPLE" # Маркер простого товара
-            print(f"✅ Товар создан.")
-        except ValueError:
-            print("Ошибка: введите число!")
+    # Если это одиночный товар (строка "SIMPLE" или старый формат названия)
+    if isinstance(item, str):
+        return {}
     
-    else:
-        # --- Логика для НАБОРА ---
-        print(f"\nСобираем состав для '{sku_name}'. Enter для завершения.")
-        components = {}
+    # Возвращаем копию словаря (состав набора)
+    return item.copy() if isinstance(item, dict) else {}
+
+def save_item(sku, content):
+    """Сохраняет артикул в каталог и инициализирует его в инвентаре"""
+    try:
+        sku_stripped = sku.strip()
         
-        while True:
-            comp_sku = input("Артикул компонента: ").strip()
-            if not comp_sku:
-                break
+        # 1. ОБНОВЛЕНИЕ КАТАЛОГА (recipes.json)
+        catalog = data_manager.load_json('recipes')
+        
+        # Если словарь состава пустой — записываем "SIMPLE", иначе сам словарь
+        final_value = content if content else "SIMPLE"
+        
+        catalog[sku_stripped] = final_value
+        data_manager.save_json('recipes', catalog)
+        print(f"DEBUG: {sku_stripped} сохранен в recipes как {final_value}")
+
+        # 2. ОБНОВЛЕНИЕ СКЛАДА (inventory.json)
+        inventory = data_manager.load_json('inventory')
+        
+        # Если товара еще нет на складе, создаем запись с 0
+        if sku_stripped not in inventory:
+            inventory[sku_stripped] = 0
+            data_manager.save_json('inventory', inventory)
+            print(f"DEBUG: {sku_stripped} инициализирован в inventory с остатком 0")
             
-            # Если компонента нет на складе, предлагаем создать
-            if comp_sku not in inventory:
-                print(f"⚠️ Компонент '{comp_sku}' не найден на складе.")
-                create = input("Добавить его как простой товар? (д/н): ")
-                if create.lower() == 'д':
-                    qty_comp = int(input(f"Остаток '{comp_sku}': "))
-                    inventory[comp_sku] = qty_comp
-                    recipes[comp_sku] = "SIMPLE"
-                else:
-                    print("Компонент пропущен.")
-                    continue
+        return {"status": "success"}
+    except Exception as e:
+        print(f"DEBUG: Ошибка при сохранении: {e}")
+        return {"status": "error", "message": str(e)}
 
-            try:
-                comp_qty = int(input(f"Кол-во '{comp_sku}' в наборе: "))
-                components[comp_sku] = comp_qty
-            except ValueError:
-                print("Нужно ввести число.")
+def delete_item(sku):
+    """Полное удаление артикула из системы (Каталог + Склад)"""
+    try:
+        # 1. Удаляем из каталога (recipes.json)
+        catalog = data_manager.load_json('recipes')
+        if sku in catalog:
+            del catalog[sku]
+            data_manager.save_json('recipes', catalog)
+            print(f"DEBUG: {sku} удален из каталога (recipes.json)")
+
+        # 2. Удаляем из инвентаря (inventory.json)
+        inventory = data_manager.load_json('inventory')
+        if sku in inventory:
+            del inventory[sku]
+            data_manager.save_json('inventory', inventory)
+            print(f"DEBUG: {sku} удален из склада (inventory.json)")
+            
+        return True
+    except Exception as e:
+        print(f"DEBUG: Ошибка при удалении: {e}")
+        return False
+
+def process_catalog_excel(file_path):
+    """Массовый импорт: добавляет товары в recipes как SIMPLE и создает их в inventory"""
+    try:
+        df = pd.read_excel(file_path, header=None)
+        catalog = data_manager.load_json('recipes')
+        inventory = data_manager.load_json('inventory')
+        count = 0
         
-        if components:
-            recipes[sku_name] = components
-            print(f"✅ Набор сохранен ({len(components)} компонентов).")
-        else:
-            print("❌ Набор пуст, не сохранен.")
-
-    # Сохраняем изменения
-    data_manager.save_json('recipes', recipes)
-    data_manager.save_json('inventory', inventory)
+        for _, row in df.iterrows():
+            raw_sku = str(row.iloc[0]).strip()
+            
+            if raw_sku and raw_sku.lower() != "nan" and raw_sku != "":
+                # Добавляем в рецепты как одиночный товар, если его там нет
+                if raw_sku not in catalog:
+                    catalog[raw_sku] = "SIMPLE"
+                
+                # Добавляем на склад с нулевым остатком, если его там нет
+                if raw_sku not in inventory:
+                    inventory[raw_sku] = 0
+                    count += 1
+                    
+        data_manager.save_json('recipes', catalog)
+        data_manager.save_json('inventory', inventory)
+        return {"status": "success", "count": count}
+    except Exception as e:
+        print(f"DEBUG: Ошибка Excel: {e}")
+        return {"status": "error", "message": str(e)}

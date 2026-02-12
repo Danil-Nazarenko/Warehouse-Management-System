@@ -1,26 +1,34 @@
 import data_manager
+import pandas as pd
 
-def report_defect():
+def report_defect(sku, amount, force=False):
     inventory = data_manager.load_json('inventory')
-    
-    print("\n--- СПИСАНИЕ БРАКА ---")
-    sku = input("Введите артикул бракованного товара: ").strip()
+    sku = sku.strip()
     
     if sku not in inventory:
-        print(f"❌ Товара '{sku}' нет на остатках.")
-        return
+        return {"status": "error", "message": f"Товара '{sku}' нет на остатках."}
 
+    if amount > inventory[sku] and not force:
+        return {
+            "status": "confirm_needed", 
+            "message": f"На складе всего {inventory[sku]} шт. Списать {amount} шт. и уйти в минус?"
+        }
+
+    inventory[sku] -= amount
+    data_manager.save_json('inventory', inventory)
+    return {"status": "success", "message": f"Брак по {sku} списан."}
+
+def process_excel_waste(file_path):
+    """Логика чтения Excel для брака"""
     try:
-        amount = int(input(f"Сколько единиц '{sku}' списать как брак?: "))
-        if amount > inventory[sku]:
-            print(f"⚠️ Внимание: на складе всего {inventory[sku]}, а вы списываете {amount}.")
-            confirm = input("Продолжить? (д/н): ")
-            if confirm.lower() != 'д': return
-
-        inventory[sku] -= amount
-        data_manager.save_json('inventory', inventory)
-        print(f"✅ Списано. Остаток '{sku}': {inventory[sku]}")
-        
-        # Здесь в будущем можно добавить запись в файл log.txt для истории
-    except ValueError:
-        print("❌ Ошибка: нужно ввести целое число.")
+        df = pd.read_excel(file_path)
+        count = 0
+        for _, row in df.iterrows():
+            sku = str(row.iloc[0]).strip()
+            qty = int(row.iloc[1])
+            # Списываем принудительно (force=True), чтобы не прерывать цикл
+            report_defect(sku, qty, force=True)
+            count += 1
+        return {"status": "success", "count": count}
+    except Exception as e:
+        return {"status": "error", "message": f"Ошибка парсинга: {e}"}
