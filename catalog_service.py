@@ -10,36 +10,45 @@ def get_item_content(sku):
     catalog = data_manager.load_json('recipes')
     item = catalog.get(sku, {})
     
-    # Если это одиночный товар (строка "SIMPLE" или старый формат названия)
     if isinstance(item, str):
         return {}
     
-    # Возвращаем копию словаря (состав набора)
     return item.copy() if isinstance(item, dict) else {}
 
 def save_item(sku, content):
-    """Сохраняет артикул в каталог и инициализирует его в инвентаре"""
+    """
+    Сохраняет артикул. 
+    Одиночные товары (content={}) попадают в каталог как "SIMPLE" и в инвентарь.
+    Наборы (content={...}) попадают только в каталог.
+    """
     try:
         sku_stripped = sku.strip()
-        
-        # 1. ОБНОВЛЕНИЕ КАТАЛОГА (recipes.json)
         catalog = data_manager.load_json('recipes')
         
-        # Если словарь состава пустой — записываем "SIMPLE", иначе сам словарь
-        final_value = content if content else "SIMPLE"
+        # 1. ОПРЕДЕЛЯЕМ ТИП ТОВАРА
+        is_kit = bool(content) # Если словарь состава не пустой — это набор
+        final_value = content if is_kit else "SIMPLE"
         
+        # 2. СОХРАНЯЕМ В КАТАЛОГ (всегда)
         catalog[sku_stripped] = final_value
         data_manager.save_json('recipes', catalog)
-        print(f"DEBUG: {sku_stripped} сохранен в recipes как {final_value}")
+        print(f"DEBUG: {sku_stripped} сохранен в каталог как {'НАБОР' if is_kit else 'SIMPLE'}")
 
-        # 2. ОБНОВЛЕНИЕ СКЛАДА (inventory.json)
+        # 3. РАБОТА С ИНВЕНТАРЕМ
         inventory = data_manager.load_json('inventory')
         
-        # Если товара еще нет на складе, создаем запись с 0
-        if sku_stripped not in inventory:
-            inventory[sku_stripped] = 0
-            data_manager.save_json('inventory', inventory)
-            print(f"DEBUG: {sku_stripped} инициализирован в inventory с остатком 0")
+        if not is_kit:
+            # Если это одиночный товар, и его нет в инвентаре — добавляем
+            if sku_stripped not in inventory:
+                inventory[sku_stripped] = 0
+                data_manager.save_json('inventory', inventory)
+                print(f"DEBUG: Одиночный товар {sku_stripped} добавлен на склад")
+        else:
+            # Если мы превратили старый одиночный товар в набор — удаляем его из инвентаря
+            if sku_stripped in inventory:
+                del inventory[sku_stripped]
+                data_manager.save_json('inventory', inventory)
+                print(f"DEBUG: {sku_stripped} стал набором и удален из списка остатков склада")
             
         return {"status": "success"}
     except Exception as e:
@@ -47,21 +56,19 @@ def save_item(sku, content):
         return {"status": "error", "message": str(e)}
 
 def delete_item(sku):
-    """Полное удаление артикула из системы (Каталог + Склад)"""
+    """Полное удаление артикула из всей системы"""
     try:
-        # 1. Удаляем из каталога (recipes.json)
+        # Удаляем из каталога
         catalog = data_manager.load_json('recipes')
         if sku in catalog:
             del catalog[sku]
             data_manager.save_json('recipes', catalog)
-            print(f"DEBUG: {sku} удален из каталога (recipes.json)")
 
-        # 2. Удаляем из инвентаря (inventory.json)
+        # Удаляем из инвентаря (если он там был)
         inventory = data_manager.load_json('inventory')
         if sku in inventory:
             del inventory[sku]
             data_manager.save_json('inventory', inventory)
-            print(f"DEBUG: {sku} удален из склада (inventory.json)")
             
         return True
     except Exception as e:
@@ -69,7 +76,7 @@ def delete_item(sku):
         return False
 
 def process_catalog_excel(file_path):
-    """Массовый импорт: добавляет товары в recipes как SIMPLE и создает их в inventory"""
+    """Массовый импорт одиночных товаров (всегда SIMPLE и всегда в инвентарь)"""
     try:
         df = pd.read_excel(file_path, header=None)
         catalog = data_manager.load_json('recipes')
@@ -78,13 +85,10 @@ def process_catalog_excel(file_path):
         
         for _, row in df.iterrows():
             raw_sku = str(row.iloc[0]).strip()
-            
             if raw_sku and raw_sku.lower() != "nan" and raw_sku != "":
-                # Добавляем в рецепты как одиночный товар, если его там нет
+                # Для Excel-импорта мы по умолчанию считаем всё одиночными запчастями
                 if raw_sku not in catalog:
                     catalog[raw_sku] = "SIMPLE"
-                
-                # Добавляем на склад с нулевым остатком, если его там нет
                 if raw_sku not in inventory:
                     inventory[raw_sku] = 0
                     count += 1
