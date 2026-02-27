@@ -74,3 +74,29 @@ def process_morning_orders(filename):
 
     data_manager.save_json('inventory', inventory)
     print(f"\n--- Итог: успешно обработано {processed_count} единиц товара ---")
+
+def swap_items(sku_to_add, sku_to_remove, qty=1):
+    """
+    Проводит рокировку:
+    1. Возвращает sku_to_add на склад (+qty)
+    2. Списывает sku_to_remove со склада (-qty)
+    """
+    inventory = data_manager.load_json('inventory')
+    
+    # Проверка на наличие артикулов
+    if sku_to_add not in inventory or sku_to_remove not in inventory:
+        return {"status": "error", "message": "Один из артикулов не найден в базе"}
+
+    if inventory[sku_to_remove] < qty:
+        return {"status": "error", "message": f"Недостаточно '{sku_to_remove}' для списания"}
+
+    inventory[sku_to_add] += qty
+    inventory[sku_to_remove] -= qty
+    
+    data_manager.save_json('inventory', inventory)
+    return {"status": "success"}
+
+def get_all_skus():
+    """Возвращает просто список всех артикулов для поиска"""
+    inventory = data_manager.load_json('inventory')
+    return list(inventory.keys())

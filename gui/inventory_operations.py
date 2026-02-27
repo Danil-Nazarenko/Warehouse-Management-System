@@ -1,0 +1,132 @@
+import customtkinter as ctk
+from tkinter import filedialog, messagebox
+import supply_service
+import waste_service
+import warehouse_service
+
+class InventoryOperations:
+    def __init__(self, parent_app):
+        self.parent = parent_app
+        self.all_skus = []
+
+    # --- УНИВЕРСАЛЬНЫЙ ПОИСК (Вынес, чтобы не дублировать) ---
+    def _setup_autocomplete(self, combo):
+        def on_filter(event):
+            if event.keysym in ("Up", "Down", "Return", "Escape", "Tab"):
+                return
+            val = combo.get().lower()
+            matches = [s for s in self.all_skus if val in s.lower()] if val else self.all_skus
+            combo.configure(values=matches[:20])
+
+        def on_click(event):
+            if not combo._is_open:
+                combo._open_dropdown_menu()
+
+        combo._entry.bind("<KeyRelease>", on_filter)
+        combo._entry.bind("<Button-1>", on_click)
+
+    # --- ОБЩИЙ ОБРАБОТЧИК ДЛЯ ПРОСТЫХ ОПЕРАЦИЙ ---
+    def _execute_operation(self, window, service_func, sku, qty, success_msg="Готово"):
+        if sku and qty.isdigit():
+            res = service_func(sku.strip(), int(qty))
+            if res["status"] == "success":
+                messagebox.showinfo("Успех", res.get("message", success_msg))
+                window.destroy()
+                self._refresh_ui()
+            else:
+                messagebox.showerror("Ошибка", res["message"])
+        else:
+            messagebox.showerror("Ошибка", "Проверьте SKU и количество")
+
+    def run_supply_ui(self):
+        window = self._create_popup("Приемка товара", "#2ecc71")
+        
+        excel_f = ctk.CTkFrame(window, border_width=1, border_color="#2ecc71")
+        excel_f.pack(fill="x", padx=30, pady=10)
+        ctk.CTkButton(excel_f, text="📂 Выбрать файл Excel", 
+                      command=lambda: self._process_supply_excel(window)).pack(pady=10)
+        
+        ctk.CTkLabel(window, text="── ИЛИ ВРУЧНУЮ ──", text_color="gray").pack(pady=15)
+        sku_e = self._create_entry(window, "Артикул (SKU):")
+        qty_e = self._create_entry(window, "Количество:")
+        
+        ctk.CTkButton(window, text="✅ ПРИНЯТЬ", fg_color="#27ae60", height=40,
+                      command=lambda: self._execute_operation(window, supply_service.add_supply, sku_e.get(), qty_e.get())).pack(pady=20)
+
+    def run_waste_ui(self):
+        window = self._create_popup("Списание брака", "#e74c3c")
+        sku_e = self._create_entry(window, "Артикул (SKU):")
+        qty_e = self._create_entry(window, "Количество к списанию:")
+        
+        ctk.CTkButton(window, text="🗑 СПИСАТЬ", fg_color="#c0392b", height=40,
+                      command=lambda: self._execute_operation(window, waste_service.report_defect, sku_e.get(), qty_e.get())).pack(pady=20)
+
+    def run_swap_ui(self):
+        self.all_skus = warehouse_service.get_all_skus()
+        window = self._create_popup("Мастер замены (Пересорт)", "#3498db")
+        window.geometry("450x550")
+
+        # Секция 1
+        ctk.CTkLabel(window, text="1. ТОВАР ИЗ ЗАКАЗА", font=("Arial", 11, "bold")).pack(pady=(20, 0))
+        combo_from = ctk.CTkComboBox(window, width=320, values=self.all_skus)
+        combo_from.set("")
+        combo_from.pack(pady=5)
+        self._setup_autocomplete(combo_from)
+
+        # Секция 2
+        ctk.CTkLabel(window, text="2. ТОВАР ПО ФАКТУ", font=("Arial", 11, "bold")).pack(pady=(20, 0))
+        combo_to = ctk.CTkComboBox(window, width=320, values=self.all_skus)
+        combo_to.set("")
+        combo_to.pack(pady=5)
+        self._setup_autocomplete(combo_to)
+
+        # Секция 3
+        ctk.CTkLabel(window, text="3. КОЛИЧЕСТВО", font=("Arial", 11, "bold")).pack(pady=(20, 0))
+        qty_val = ctk.StringVar(value="1")
+        ctk.CTkEntry(window, textvariable=qty_val, width=80, justify="center").pack(pady=5)
+
+        def confirm_swap():
+            s_from, s_to, q = combo_from.get(), combo_to.get(), qty_val.get()
+            if s_from and s_to and q.isdigit():
+                res = warehouse_service.swap_items(s_from, s_to, int(q))
+                if res["status"] == "success":
+                    messagebox.showinfo("Готово", "Склад синхронизирован")
+                    window.destroy()
+                    self._refresh_ui()
+                else: messagebox.showerror("Ошибка", res["message"])
+            else: messagebox.showerror("Ошибка", "Заполните данные")
+
+        ctk.CTkButton(window, text="✅ ПОДТВЕРДИТЬ ЗАМЕНУ", fg_color="#3498db", 
+                      height=50, width=320, font=("Arial", 12, "bold"), 
+                      command=confirm_swap).pack(pady=40)
+
+        combo_from._entry.focus_set()
+
+    # --- Вспомогательные методы остаются без изменений ---
+    def _create_popup(self, title, color):
+        win = ctk.CTkToplevel(self.parent)
+        win.title(title)
+        win.geometry("450x550")
+        win.attributes("-topmost", True)
+        ctk.CTkLabel(win, text=title.upper(), font=("Arial", 18, "bold"), text_color=color).pack(pady=15)
+        return win
+
+    def _create_entry(self, window, label):
+        ctk.CTkLabel(window, text=label).pack()
+        e = ctk.CTkEntry(window, width=250)
+        e.pack(pady=5)
+        return e
+
+    def _refresh_ui(self):
+        if self.parent.current_view and hasattr(self.parent.current_view, 'refresh'):
+            self.parent.current_view.refresh()
+
+    def _process_supply_excel(self, win):
+        path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
+        if path:
+            res = supply_service.process_excel_supply(path)
+            if res["status"] == "success":
+                messagebox.showinfo("Успех", f"Принято {res['count']} позиций")
+                win.destroy()
+                self._refresh_ui()
+            else: messagebox.showerror("Ошибка", res["message"])
