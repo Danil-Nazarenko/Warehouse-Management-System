@@ -5,6 +5,10 @@ from gui.catalog_frame import CatalogFrame
 # Новые модули операций
 from gui.inventory_operations import InventoryOperations
 from gui.shipping_frame import ShippingManager
+from gui.active_view import ActiveInventoryView 
+
+# ИМПОРТ СЕРВИСА ОБНОВЛЕНИЙ
+from gui.updater_service import check_for_update
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -39,19 +43,37 @@ class WarehouseApp(ctk.CTk):
         ctk.CTkLabel(self.logo_container, text="Ord", font=ctk.CTkFont(size=32, weight="bold")).pack(side="left")
         ctk.CTkLabel(self.logo_container, text="O", font=ctk.CTkFont(size=34, weight="bold"), text_color="#3b8ed0").pack(side="left")
 
-        # Кнопки меню - теперь все в ряд без дырок
+        # Кнопки меню
         self.btn_inventory = self.create_sidebar_button("📊 Склад", self.show_inventory_ui, 1)
-        self.btn_orders = self.create_sidebar_button("📑 Загрузка заказов", self.shipping.run_morning_orders, 2)
-        self.btn_supply = self.create_sidebar_button("🚛 Приход товара", self.inv_ops.run_supply_ui, 3)
-        self.btn_swap = self.create_sidebar_button("🔄 Замена (Пересорт)", self.inv_ops.run_swap_ui, 4)
-        self.btn_waste = self.create_sidebar_button("🛠 Списание брака", self.inv_ops.run_waste_ui, 5)
-        self.btn_catalog = self.create_sidebar_button("📦 Каталог", self.show_catalog_ui, 6)
+        self.btn_active = self.create_sidebar_button("🔥 Актуальное", self.show_active_ui, 2)
+        
+        self.btn_orders = self.create_sidebar_button("📑 Загрузка заказов", self.shipping.run_morning_orders, 3)
+        self.btn_supply = self.create_sidebar_button("🚛 Приход товара", self.inv_ops.run_supply_ui, 4)
+        self.btn_swap = self.create_sidebar_button("🔄 Замена (Пересорт)", self.inv_ops.run_swap_ui, 5)
+        self.btn_waste = self.create_sidebar_button("🛠 Списание брака", self.inv_ops.run_waste_ui, 6)
+        self.btn_catalog = self.create_sidebar_button("📦 Каталог", self.show_catalog_ui, 7)
 
-        # НАСТРОЙКА СЕТКИ: 7-я строка пустая и забирает всё лишнее место
-        self.sidebar_frame.grid_rowconfigure(7, weight=1)
+        # НАСТРОЙКА СЕТКИ: 8-я строка забирает всё свободное место, толкая кнопки вниз
+        self.sidebar_frame.grid_rowconfigure(8, weight=1)
 
-        # Кнопка выхода на 8-й строке (будет в самом низу)
-        ctk.CTkButton(self.sidebar_frame, text="Выход", fg_color="transparent", border_width=1, command=self.destroy).grid(row=8, column=0, padx=20, pady=20, sticky="s")
+        # КНОПКА ОБНОВЛЕНИЯ (в стиле кнопки выхода)
+        self.btn_update = ctk.CTkButton(
+            self.sidebar_frame, 
+            text="Обновление", 
+            fg_color="transparent", 
+            border_width=1, 
+            command=lambda: check_for_update(self)
+        )
+        self.btn_update.grid(row=9, column=0, padx=20, pady=(10, 0), sticky="s")
+
+        # Кнопка выхода на 10-й строке
+        ctk.CTkButton(
+            self.sidebar_frame, 
+            text="Выход", 
+            fg_color="transparent", 
+            border_width=1, 
+            command=self.destroy
+        ).grid(row=10, column=0, padx=20, pady=20, sticky="s")
 
         # Контейнер
         self.main_frame = ctk.CTkFrame(self, corner_radius=10)
@@ -63,6 +85,11 @@ class WarehouseApp(ctk.CTk):
         btn = ctk.CTkButton(self.sidebar_frame, text=text, command=command, height=40, corner_radius=8, fg_color="transparent", anchor="w")
         btn.grid(row=row, column=0, padx=10, pady=5, sticky="ew")
         return btn
+
+    def show_active_ui(self):
+        self.clear_main_frame()
+        self.current_view = ActiveInventoryView(self.main_frame)
+        self.current_view.pack(fill="both", expand=True)
 
     def universal_search_handler(self, *args):
         if self.current_view and hasattr(self.current_view, 'refresh'):

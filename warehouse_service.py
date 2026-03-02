@@ -18,20 +18,16 @@ def process_morning_orders(filename):
     # Собираем все заказы в один плоский список [(sku, qty), (sku, qty)...]
     extracted_orders = []
     
-    # Итерируемся по столбцам с шагом 4 (пропускаем пустой, берем SKU, берем QTY, пропускаем разделитель)
-    # Судя по твоему описанию: 0-пусто, 1-SKU, 2-QTY, 3-разделитель...
     for col_idx in range(0, df.shape[1], 4):
-        # Проверяем, не вышли ли мы за пределы таблицы
         if col_idx + 2 < df.shape[1]:
-            block = df.iloc[:, [col_idx + 1, col_idx + 2]] # Берем столбец артикула и кол-ва
-            # Очищаем от пустых строк в этом блоке
+            block = df.iloc[:, [col_idx + 1, col_idx + 2]]
             block = block.dropna()
             
             for _, row in block.iterrows():
                 sku = str(row.iloc[0]).strip()
                 try:
                     qty = int(row.iloc[1])
-                    if sku and sku != 'nan' and sku != 'Артикул': # Игнорируем мусор
+                    if sku and sku != 'nan' and sku != 'Артикул':
                         extracted_orders.append((sku, qty))
                 except (ValueError, TypeError):
                     continue
@@ -42,8 +38,11 @@ def process_morning_orders(filename):
 
     print(f"Найдено позиций в файле: {len(extracted_orders)}")
 
-    # --- ЛОГИКА СПИСАНИЯ (уже знакомая нам) ---
+    # --- ЛОГИКА СПИСАНИЯ ---
     processed_count = 0
+    # Список для накопления артикулов, которые обновились за этот прогон
+    updated_skus_pool = []
+
     for order_sku, order_qty in extracted_orders:
         if order_sku not in recipes:
             print(f"⚠️ Артикул '{order_sku}' не найден в рецептах (Пропущен)")
@@ -69,10 +68,19 @@ def process_morning_orders(filename):
         if can_fulfill:
             for item, q_needed in items_to_deduct.items():
                 inventory[item] -= q_needed
+                # Добавляем "чистый" артикул в список на обновление кэша
+                updated_skus_pool.append(item)
+                
             processed_count += order_qty
             print(f"✅ Списано: {order_sku} ({order_qty} шт.)")
 
+    # Сохраняем инвентарь
     data_manager.save_json('inventory', inventory)
+    
+    # ОБНОВЛЯЕМ ТОП-300: отправляем весь список изменившихся товаров
+    if updated_skus_pool:
+        data_manager.update_recent_300(updated_skus_pool)
+
     print(f"\n--- Итог: успешно обработано {processed_count} единиц товара ---")
 
 def swap_items(sku_to_add, sku_to_remove, qty=1):
@@ -83,7 +91,6 @@ def swap_items(sku_to_add, sku_to_remove, qty=1):
     """
     inventory = data_manager.load_json('inventory')
     
-    # Проверка на наличие артикулов
     if sku_to_add not in inventory or sku_to_remove not in inventory:
         return {"status": "error", "message": "Один из артикулов не найден в базе"}
 
@@ -93,7 +100,12 @@ def swap_items(sku_to_add, sku_to_remove, qty=1):
     inventory[sku_to_add] += qty
     inventory[sku_to_remove] -= qty
     
+    # Сохраняем изменения
     data_manager.save_json('inventory', inventory)
+    
+    # ОБНОВЛЯЕМ ТОП-300: при замене оба товара считаются "актуальными"
+    data_manager.update_recent_300([sku_to_add, sku_to_remove])
+    
     return {"status": "success"}
 
 def get_all_skus():

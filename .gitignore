@@ -1,3 +1,5 @@
-recipes.json
-inventory.json
+build/
+dist/
+*.spec
 __pycache__/
+*.json
