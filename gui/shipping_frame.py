@@ -1,6 +1,10 @@
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
+import os
 import warehouse_service
+
+# ИМПОРТ ЛОГГЕРА
+from gui.logger_service import log_action
 
 class ShippingManager:
     def __init__(self, parent_app):
@@ -19,6 +23,11 @@ class ShippingManager:
         try:
             # 1. Основная логика списания со склада
             warehouse_service.process_morning_orders(file_path)
+            
+            # ЛОГИРОВАНИЕ В ИСТОРИЮ
+            # Берем только название файла без полного пути для чистоты лога
+            file_name = os.path.basename(file_path)
+            log_action(f"Загрузка заказов: {file_name}")
             
             # 2. МЕСТО ДЛЯ БУДУЩЕЙ АНАЛИТИКИ
             # Здесь мы будем вызывать методы вроде self.update_analytics(file_path)

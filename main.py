@@ -1,14 +1,11 @@
 import customtkinter as ctk
 from gui.inventory_frame import InventoryFrame
 from gui.catalog_frame import CatalogFrame
-
-# Новые модули операций
 from gui.inventory_operations import InventoryOperations
 from gui.shipping_frame import ShippingManager
 from gui.active_view import ActiveInventoryView 
-
-# ИМПОРТ СЕРВИСА ОБНОВЛЕНИЙ
 from gui.updater_service import check_for_update
+from gui.history_view import HistoryView # Проверь, что этот файл существует в папке gui
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -52,11 +49,14 @@ class WarehouseApp(ctk.CTk):
         self.btn_swap = self.create_sidebar_button("🔄 Замена (Пересорт)", self.inv_ops.run_swap_ui, 5)
         self.btn_waste = self.create_sidebar_button("🛠 Списание брака", self.inv_ops.run_waste_ui, 6)
         self.btn_catalog = self.create_sidebar_button("📦 Каталог", self.show_catalog_ui, 7)
+        
+        # КНОПКА ИСТОРИИ (строка 8)
+        self.btn_history = self.create_sidebar_button("📜 История", self.show_history_ui, 8)
 
-        # НАСТРОЙКА СЕТКИ: 8-я строка забирает всё свободное место, толкая кнопки вниз
-        self.sidebar_frame.grid_rowconfigure(8, weight=1)
+        # НАСТРОЙКА СЕТКИ: 9-я строка забирает всё свободное место
+        self.sidebar_frame.grid_rowconfigure(9, weight=1)
 
-        # КНОПКА ОБНОВЛЕНИЯ (в стиле кнопки выхода)
+        # КНОПКА ОБНОВЛЕНИЯ (теперь на 10-й строке)
         self.btn_update = ctk.CTkButton(
             self.sidebar_frame, 
             text="Обновление", 
@@ -64,16 +64,16 @@ class WarehouseApp(ctk.CTk):
             border_width=1, 
             command=lambda: check_for_update(self)
         )
-        self.btn_update.grid(row=9, column=0, padx=20, pady=(10, 0), sticky="s")
+        self.btn_update.grid(row=10, column=0, padx=20, pady=(10, 0), sticky="s")
 
-        # Кнопка выхода на 10-й строке
+        # Кнопка выхода (на 11-й строке)
         ctk.CTkButton(
             self.sidebar_frame, 
             text="Выход", 
             fg_color="transparent", 
             border_width=1, 
             command=self.destroy
-        ).grid(row=10, column=0, padx=20, pady=20, sticky="s")
+        ).grid(row=11, column=0, padx=20, pady=20, sticky="s")
 
         # Контейнер
         self.main_frame = ctk.CTkFrame(self, corner_radius=10)
@@ -90,6 +90,12 @@ class WarehouseApp(ctk.CTk):
         self.clear_main_frame()
         self.current_view = ActiveInventoryView(self.main_frame)
         self.current_view.pack(fill="both", expand=True)
+
+    # МЕТОД ДЛЯ ОТОБРАЖЕНИЯ ИСТОРИИ
+    def show_history_ui(self):
+        self.clear_main_frame()
+        self.current_view = HistoryView(self.main_frame)
+        self.current_view.pack(fill="both", expand=True, padx=20, pady=20)
 
     def universal_search_handler(self, *args):
         if self.current_view and hasattr(self.current_view, 'refresh'):

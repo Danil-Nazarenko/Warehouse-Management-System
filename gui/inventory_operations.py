@@ -1,15 +1,19 @@
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
+import os
 import supply_service
 import waste_service
 import warehouse_service
+
+# ИМПОРТ ЛОГГЕРА
+from gui.logger_service import log_action
 
 class InventoryOperations:
     def __init__(self, parent_app):
         self.parent = parent_app
         self.all_skus = []
 
-    # --- УНИВЕРСАЛЬНЫЙ ПОИСК (Вынес, чтобы не дублировать) ---
+    # --- УНИВЕРСАЛЬНЫЙ ПОИСК ---
     def _setup_autocomplete(self, combo):
         def on_filter(event):
             if event.keysym in ("Up", "Down", "Return", "Escape", "Tab"):
@@ -26,10 +30,13 @@ class InventoryOperations:
         combo._entry.bind("<Button-1>", on_click)
 
     # --- ОБЩИЙ ОБРАБОТЧИК ДЛЯ ПРОСТЫХ ОПЕРАЦИЙ ---
-    def _execute_operation(self, window, service_func, sku, qty, success_msg="Готово"):
+    def _execute_operation(self, window, service_func, sku, qty, success_msg="Готово", op_type="Действие"):
         if sku and qty.isdigit():
             res = service_func(sku.strip(), int(qty))
             if res["status"] == "success":
+                # ЛОГИРОВАНИЕ УСПЕШНОГО ДЕЙСТВИЯ (Приход или Списание)
+                log_action(f"{op_type}: {sku} ({qty} шт.)")
+                
                 messagebox.showinfo("Успех", res.get("message", success_msg))
                 window.destroy()
                 self._refresh_ui()
@@ -50,37 +57,36 @@ class InventoryOperations:
         sku_e = self._create_entry(window, "Артикул (SKU):")
         qty_e = self._create_entry(window, "Количество:")
         
+        # Передаем op_type="Приход" для лога
         ctk.CTkButton(window, text="✅ ПРИНЯТЬ", fg_color="#27ae60", height=40,
-                      command=lambda: self._execute_operation(window, supply_service.add_supply, sku_e.get(), qty_e.get())).pack(pady=20)
+                      command=lambda: self._execute_operation(window, supply_service.add_supply, sku_e.get(), qty_e.get(), op_type="Приход")).pack(pady=20)
 
     def run_waste_ui(self):
         window = self._create_popup("Списание брака", "#e74c3c")
         sku_e = self._create_entry(window, "Артикул (SKU):")
         qty_e = self._create_entry(window, "Количество к списанию:")
         
+        # Передаем op_type="Брак" для лога
         ctk.CTkButton(window, text="🗑 СПИСАТЬ", fg_color="#c0392b", height=40,
-                      command=lambda: self._execute_operation(window, waste_service.report_defect, sku_e.get(), qty_e.get())).pack(pady=20)
+                      command=lambda: self._execute_operation(window, waste_service.report_defect, sku_e.get(), qty_e.get(), op_type="Брак")).pack(pady=20)
 
     def run_swap_ui(self):
         self.all_skus = warehouse_service.get_all_skus()
         window = self._create_popup("Мастер замены (Пересорт)", "#3498db")
         window.geometry("450x550")
 
-        # Секция 1
         ctk.CTkLabel(window, text="1. ТОВАР ИЗ ЗАКАЗА", font=("Arial", 11, "bold")).pack(pady=(20, 0))
         combo_from = ctk.CTkComboBox(window, width=320, values=self.all_skus)
         combo_from.set("")
         combo_from.pack(pady=5)
         self._setup_autocomplete(combo_from)
 
-        # Секция 2
         ctk.CTkLabel(window, text="2. ТОВАР ПО ФАКТУ", font=("Arial", 11, "bold")).pack(pady=(20, 0))
         combo_to = ctk.CTkComboBox(window, width=320, values=self.all_skus)
         combo_to.set("")
         combo_to.pack(pady=5)
         self._setup_autocomplete(combo_to)
 
-        # Секция 3
         ctk.CTkLabel(window, text="3. КОЛИЧЕСТВО", font=("Arial", 11, "bold")).pack(pady=(20, 0))
         qty_val = ctk.StringVar(value="1")
         ctk.CTkEntry(window, textvariable=qty_val, width=80, justify="center").pack(pady=5)
@@ -90,6 +96,9 @@ class InventoryOperations:
             if s_from and s_to and q.isdigit():
                 res = warehouse_service.swap_items(s_from, s_to, int(q))
                 if res["status"] == "success":
+                    # ЛОГИРОВАНИЕ ЗАМЕНЫ
+                    log_action(f"Замена: {s_from} -> {s_to} ({q} шт.)")
+                    
                     messagebox.showinfo("Готово", "Склад синхронизирован")
                     window.destroy()
                     self._refresh_ui()
@@ -102,7 +111,6 @@ class InventoryOperations:
 
         combo_from._entry.focus_set()
 
-    # --- Вспомогательные методы остаются без изменений ---
     def _create_popup(self, title, color):
         win = ctk.CTkToplevel(self.parent)
         win.title(title)
@@ -126,6 +134,10 @@ class InventoryOperations:
         if path:
             res = supply_service.process_excel_supply(path)
             if res["status"] == "success":
+                # ЛОГИРОВАНИЕ ЗАГРУЗКИ ФАЙЛА
+                f_name = os.path.basename(path)
+                log_action(f"Excel-приемка: {f_name} ({res['count']} поз.)")
+                
                 messagebox.showinfo("Успех", f"Принято {res['count']} позиций")
                 win.destroy()
                 self._refresh_ui()
