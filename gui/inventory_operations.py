@@ -5,6 +5,8 @@ import supply_service
 import waste_service
 import warehouse_service
 
+# ИМПОРТ НАШЕГО ГОСТ-ПОЛЯ
+from .components import OrdoEntry
 # ИМПОРТ ЛОГГЕРА
 from gui.logger_service import log_action
 
@@ -34,7 +36,7 @@ class InventoryOperations:
         if sku and qty.isdigit():
             res = service_func(sku.strip(), int(qty))
             if res["status"] == "success":
-                # ЛОГИРОВАНИЕ УСПЕШНОГО ДЕЙСТВИЯ (Приход или Списание)
+                # ЛОГИРОВАНИЕ УСПЕШНОГО ДЕЙСТВИЯ
                 log_action(f"{op_type}: {sku} ({qty} шт.)")
                 
                 messagebox.showinfo("Успех", res.get("message", success_msg))
@@ -54,19 +56,17 @@ class InventoryOperations:
                       command=lambda: self._process_supply_excel(window)).pack(pady=10)
         
         ctk.CTkLabel(window, text="── ИЛИ ВРУЧНУЮ ──", text_color="gray").pack(pady=15)
-        sku_e = self._create_entry(window, "Артикул (SKU):")
-        qty_e = self._create_entry(window, "Количество:")
+        sku_e = self._create_entry(window, "Артикул (SKU):", "Напр: ABC-123")
+        qty_e = self._create_entry(window, "Количество:", "0")
         
-        # Передаем op_type="Приход" для лога
         ctk.CTkButton(window, text="✅ ПРИНЯТЬ", fg_color="#27ae60", height=40,
                       command=lambda: self._execute_operation(window, supply_service.add_supply, sku_e.get(), qty_e.get(), op_type="Приход")).pack(pady=20)
 
     def run_waste_ui(self):
         window = self._create_popup("Списание брака", "#e74c3c")
-        sku_e = self._create_entry(window, "Артикул (SKU):")
-        qty_e = self._create_entry(window, "Количество к списанию:")
+        sku_e = self._create_entry(window, "Артикул (SKU):", "Введите SKU")
+        qty_e = self._create_entry(window, "Количество к списанию:", "0")
         
-        # Передаем op_type="Брак" для лога
         ctk.CTkButton(window, text="🗑 СПИСАТЬ", fg_color="#c0392b", height=40,
                       command=lambda: self._execute_operation(window, waste_service.report_defect, sku_e.get(), qty_e.get(), op_type="Брак")).pack(pady=20)
 
@@ -89,16 +89,15 @@ class InventoryOperations:
 
         ctk.CTkLabel(window, text="3. КОЛИЧЕСТВО", font=("Arial", 11, "bold")).pack(pady=(20, 0))
         qty_val = ctk.StringVar(value="1")
-        ctk.CTkEntry(window, textvariable=qty_val, width=80, justify="center").pack(pady=5)
+        # Здесь тоже используем OrdoEntry для количества
+        OrdoEntry(window, textvariable=qty_val, width=80, justify="center").pack(pady=5)
 
         def confirm_swap():
             s_from, s_to, q = combo_from.get(), combo_to.get(), qty_val.get()
             if s_from and s_to and q.isdigit():
                 res = warehouse_service.swap_items(s_from, s_to, int(q))
                 if res["status"] == "success":
-                    # ЛОГИРОВАНИЕ ЗАМЕНЫ
                     log_action(f"Замена: {s_from} -> {s_to} ({q} шт.)")
-                    
                     messagebox.showinfo("Готово", "Склад синхронизирован")
                     window.destroy()
                     self._refresh_ui()
@@ -119,9 +118,10 @@ class InventoryOperations:
         ctk.CTkLabel(win, text=title.upper(), font=("Arial", 18, "bold"), text_color=color).pack(pady=15)
         return win
 
-    def _create_entry(self, window, label):
+    def _create_entry(self, window, label, placeholder=""):
         ctk.CTkLabel(window, text=label).pack()
-        e = ctk.CTkEntry(window, width=250)
+        # ИСПОЛЬЗОВАНИЕ ГОСТ-ПОЛЯ
+        e = OrdoEntry(window, width=250, placeholder_text=placeholder)
         e.pack(pady=5)
         return e
 
@@ -134,10 +134,8 @@ class InventoryOperations:
         if path:
             res = supply_service.process_excel_supply(path)
             if res["status"] == "success":
-                # ЛОГИРОВАНИЕ ЗАГРУЗКИ ФАЙЛА
                 f_name = os.path.basename(path)
                 log_action(f"Excel-приемка: {f_name} ({res['count']} поз.)")
-                
                 messagebox.showinfo("Успех", f"Принято {res['count']} позиций")
                 win.destroy()
                 self._refresh_ui()

@@ -1,5 +1,42 @@
 import pandas as pd
 import data_manager
+from tkinter import filedialog
+
+def export_inventory_to_excel():
+    """Выгружает текущие остатки склада в файл Excel."""
+    inventory = data_manager.load_json('inventory')
+    
+    if not inventory:
+        return {"status": "error", "message": "Склад пуст, нечего выгружать"}
+
+    try:
+        # Преобразуем словарь в список для создания таблицы
+        data_list = []
+        for sku, qty in inventory.items():
+            data_list.append({
+                "Артикул (SKU)": sku,
+                "Остаток на складе": qty
+            })
+        
+        # Создаем DataFrame и сортируем для красоты
+        df = pd.DataFrame(data_list).sort_values(by="Артикул (SKU)")
+
+        # Вызываем окно выбора пути
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx")],
+            initialfile="Остатки_Склада_Актуально.xlsx",
+            title="Сохранить отчет по складу"
+        )
+
+        if file_path:
+            df.to_excel(file_path, index=False)
+            return {"status": "success", "message": f"Файл успешно сохранен"}
+        
+        return {"status": "cancel"} # Если пользователь закрыл окно выбора
+
+    except Exception as e:
+        return {"status": "error", "message": f"Ошибка при экспорте: {e}"}
 
 def process_morning_orders(filename):
     """Парсит 'шахматный' отчет (блоки по 3 столбца) и списывает остатки."""

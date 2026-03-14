@@ -1,5 +1,7 @@
 import customtkinter as ctk
 import data_manager
+import warehouse_service # Импортируем сервис для работы кнопки
+from tkinter import messagebox
 
 class InventoryFrame(ctk.CTkFrame):
     def __init__(self, master, search_var, copy_func, **kwargs):
@@ -11,13 +13,39 @@ class InventoryFrame(ctk.CTkFrame):
         header_frame = ctk.CTkFrame(self, fg_color="transparent")
         header_frame.pack(fill="x", pady=(20, 10), padx=20)
         
-        ctk.CTkLabel(header_frame, text="Склад", font=ctk.CTkFont(size=24, weight="bold")).pack(side="left")
+        # Левая часть заголовка (Надпись + Кнопка)
+        left_header = ctk.CTkFrame(header_frame, fg_color="transparent")
+        left_header.pack(side="left")
+
+        ctk.CTkLabel(left_header, text="Склад", font=ctk.CTkFont(size=24, weight="bold")).pack(side="left")
+        
+        # КНОПКА ЭКСПОРТА
+        self.export_btn = ctk.CTkButton(
+            left_header, 
+            text="📊 Экспорт Excel", 
+            width=120, 
+            height=32,
+            fg_color="#27ae60", 
+            hover_color="#219150",
+            command=self.handle_export
+        )
+        self.export_btn.pack(side="left", padx=20)
+
+        # Поиск (остается справа)
         ctk.CTkEntry(header_frame, placeholder_text="🔍 Поиск...", width=300, textvariable=self.search_var).pack(side="right")
         
         self.scroll_frame = ctk.CTkScrollableFrame(self, width=800, height=500)
         self.scroll_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
         
         self.refresh()
+
+    def handle_export(self):
+        """Вызывает сервис экспорта и показывает результат"""
+        res = warehouse_service.export_inventory_to_excel()
+        if res["status"] == "success":
+            messagebox.showinfo("Готово", res["message"])
+        elif res["status"] == "error":
+            messagebox.showerror("Ошибка", res["message"])
 
     def manual_update_stock(self, sku, new_qty_str):
         if not new_qty_str.isdigit(): return
