@@ -2,13 +2,18 @@ import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import catalog_service
 import data_manager
+from .components import SmartSearchEntry
 
 class CatalogFrame(ctk.CTkFrame):
     def __init__(self, master, search_var, parent_app, **kwargs):
         super().__init__(master, **kwargs)
         self.search_var = search_var
-        self.parent_app = parent_app  # Ссылка на WarehouseApp для вызова общих утилит
-        self.temp_content = {}        # Для работы конструктора
+        self.parent_app = parent_app  
+        self.temp_content = {}        
+
+        # Настройки пагинации для плавности работы
+        self.current_page = 0
+        self.items_per_page = 50
 
         # --- ВЕРХНЯЯ ПАНЕЛЬ ---
         header = ctk.CTkFrame(self, fg_color="transparent")
@@ -16,8 +21,17 @@ class CatalogFrame(ctk.CTkFrame):
         
         ctk.CTkLabel(header, text="📦 Каталог", font=("Arial", 24, "bold")).pack(side="left")
 
-        ctk.CTkEntry(header, placeholder_text="🔍 Поиск в каталоге...", 
-                    width=250, textvariable=self.search_var).pack(side="left", padx=20)
+        # Внедряем умный поиск
+        self.search_entry = SmartSearchEntry(
+            header, 
+            placeholder_text="🔍 Поиск в каталоге (от 3-х симв.)...", 
+            width=250, 
+            textvariable=self.search_var
+        )
+        self.search_entry.pack(side="left", padx=20)
+        
+        # Подписываемся на обновление через компонент
+        self.search_entry.bind_search(self._reset_pagination)
 
         btn_frame = ctk.CTkFrame(header, fg_color="transparent")
         btn_frame.pack(side="right")
@@ -30,38 +44,90 @@ class CatalogFrame(ctk.CTkFrame):
 
         # --- СПИСОК ТОВАРОВ ---
         self.catalog_scroll = ctk.CTkScrollableFrame(self)
-        self.catalog_scroll.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        self.catalog_scroll.pack(fill="both", expand=True, padx=20, pady=(0, 10))
         
-        # Первичная отрисовка
+        # --- БЛОК ПАГИНАЦИИ ---
+        self.pagination_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.pagination_frame.pack(fill="x", padx=20, pady=(0, 20))
+        
+        self.prev_btn = ctk.CTkButton(self.pagination_frame, text="< Назад", width=80, command=self._prev_page)
+        self.prev_btn.pack(side="left", padx=10)
+        
+        self.page_label = ctk.CTkLabel(self.pagination_frame, text="Страница 1", font=("Arial", 12))
+        self.page_label.pack(side="left", expand=True)
+        
+        self.next_btn = ctk.CTkButton(self.pagination_frame, text="Вперед >", width=80, command=self._next_page)
+        self.next_btn.pack(side="right", padx=10)
+
+        self.refresh()
+
+    def _reset_pagination(self, *args):
+        self.current_page = 0
+        self.refresh()
+
+    def _prev_page(self):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.refresh()
+
+    def _next_page(self):
+        self.current_page += 1
         self.refresh()
 
     def refresh(self, *args):
-        """Метод для обновления списка (вызывается также из поиска в main.py)"""
         if not self.winfo_exists():
             return
 
-        search_query = self.search_var.get().lower()
+        search_query = self.search_var.get().strip().lower()
+        
+        # Защита: не перерисовываем список, если введено всего 1-2 символа
+        if 0 < len(search_query) < 3:
+            return
+
         for widget in self.catalog_scroll.winfo_children():
             widget.destroy()
         
         catalog = catalog_service.get_all_items()
-        for sku, items in sorted(catalog.items()):
-            if search_query in sku.lower():
-                row = ctk.CTkFrame(self.catalog_scroll, fg_color="#2b2b2b")
-                row.pack(fill="x", pady=2, padx=5)
-                
-                is_bundle = isinstance(items, dict) and len(items) > 0
-                icon = "🧺" if is_bundle else "📦"
-                label_text = f"{icon} {sku}" + (f" (Состав: {len(items)})" if is_bundle else "")
-                
-                ctk.CTkLabel(row, text=label_text, anchor="w").pack(side="left", padx=10, pady=5)
-                
-                # Кнопки управления
-                ctk.CTkButton(row, text="✏️", width=30, 
-                              command=lambda s=sku: self.show_constructor_window(s)).pack(side="right", padx=5)
-                
-                ctk.CTkButton(row, text="🗑", width=30, fg_color="#c0392b", 
-                              command=lambda s=sku: self.delete_and_refresh(s)).pack(side="right", padx=2)
+        
+        # Фильтрация данных
+        if len(search_query) >= 3:
+            all_matches = [sku for sku in sorted(catalog.keys()) if search_query in sku.lower()]
+        else:
+            all_matches = sorted(catalog.keys())
+
+        # Расчет страниц
+        start_idx = self.current_page * self.items_per_page
+        end_idx = start_idx + self.items_per_page
+        items_to_display = all_matches[start_idx:end_idx]
+
+        # Обновление кнопок навигации
+        total_pages = (len(all_matches) - 1) // self.items_per_page + 1 if all_matches else 1
+        self.page_label.configure(text=f"Страница {self.current_page + 1} из {total_pages}")
+        self.prev_btn.configure(state="normal" if self.current_page > 0 else "disabled")
+        self.next_btn.configure(state="normal" if end_idx < len(all_matches) else "disabled")
+
+        if not items_to_display:
+            msg = "Ничего не найдено" if len(search_query) >= 3 else "Каталог пуст"
+            ctk.CTkLabel(self.catalog_scroll, text=msg, text_color="gray").pack(pady=20)
+            return
+
+        for sku in items_to_display:
+            items = catalog[sku]
+            row = ctk.CTkFrame(self.catalog_scroll, fg_color="#2b2b2b")
+            row.pack(fill="x", pady=2, padx=5)
+            
+            is_bundle = isinstance(items, dict) and len(items) > 0
+            icon = "🧺" if is_bundle else "📦"
+            label_text = f"{icon} {sku}" + (f" (Состав: {len(items)})" if is_bundle else "")
+            
+            ctk.CTkLabel(row, text=label_text, anchor="w").pack(side="left", padx=10, pady=5)
+            
+            # Кнопки управления
+            ctk.CTkButton(row, text="✏️", width=30, 
+                          command=lambda s=sku: self.show_constructor_window(s)).pack(side="right", padx=5)
+            
+            ctk.CTkButton(row, text="🗑", width=30, fg_color="#c0392b", 
+                          command=lambda s=sku: self.delete_and_refresh(s)).pack(side="right", padx=2)
 
     def delete_and_refresh(self, sku):
         if messagebox.askyesno("Удаление", f"Удалить {sku} из системы?"):
