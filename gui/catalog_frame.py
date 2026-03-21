@@ -2,7 +2,8 @@ import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import catalog_service
 import data_manager
-from .components import SmartSearchEntry
+# Импортируем оба наших исправленных класса
+from .components import SmartSearchEntry, OrdoEntry 
 
 class CatalogFrame(ctk.CTkFrame):
     def __init__(self, master, search_var, parent_app, **kwargs):
@@ -11,7 +12,7 @@ class CatalogFrame(ctk.CTkFrame):
         self.parent_app = parent_app  
         self.temp_content = {}        
 
-        # Настройки пагинации для плавности работы
+        # Настройки пагинации
         self.current_page = 0
         self.items_per_page = 50
 
@@ -21,7 +22,7 @@ class CatalogFrame(ctk.CTkFrame):
         
         ctk.CTkLabel(header, text="📦 Каталог", font=("Arial", 24, "bold")).pack(side="left")
 
-        # Внедряем умный поиск
+        # Основной поиск уже был на SmartSearchEntry — тут всё ок
         self.search_entry = SmartSearchEntry(
             header, 
             placeholder_text="🔍 Поиск в каталоге (от 3-х симв.)...", 
@@ -30,7 +31,6 @@ class CatalogFrame(ctk.CTkFrame):
         )
         self.search_entry.pack(side="left", padx=20)
         
-        # Подписываемся на обновление через компонент
         self.search_entry.bind_search(self._reset_pagination)
 
         btn_frame = ctk.CTkFrame(header, fg_color="transparent")
@@ -79,8 +79,6 @@ class CatalogFrame(ctk.CTkFrame):
             return
 
         search_query = self.search_var.get().strip().lower()
-        
-        # Защита: не перерисовываем список, если введено всего 1-2 символа
         if 0 < len(search_query) < 3:
             return
 
@@ -89,18 +87,15 @@ class CatalogFrame(ctk.CTkFrame):
         
         catalog = catalog_service.get_all_items()
         
-        # Фильтрация данных
         if len(search_query) >= 3:
             all_matches = [sku for sku in sorted(catalog.keys()) if search_query in sku.lower()]
         else:
             all_matches = sorted(catalog.keys())
 
-        # Расчет страниц
         start_idx = self.current_page * self.items_per_page
         end_idx = start_idx + self.items_per_page
         items_to_display = all_matches[start_idx:end_idx]
 
-        # Обновление кнопок навигации
         total_pages = (len(all_matches) - 1) // self.items_per_page + 1 if all_matches else 1
         self.page_label.configure(text=f"Страница {self.current_page + 1} из {total_pages}")
         self.prev_btn.configure(state="normal" if self.current_page > 0 else "disabled")
@@ -122,7 +117,6 @@ class CatalogFrame(ctk.CTkFrame):
             
             ctk.CTkLabel(row, text=label_text, anchor="w").pack(side="left", padx=10, pady=5)
             
-            # Кнопки управления
             ctk.CTkButton(row, text="✏️", width=30, 
                           command=lambda s=sku: self.show_constructor_window(s)).pack(side="right", padx=5)
             
@@ -143,21 +137,19 @@ class CatalogFrame(ctk.CTkFrame):
                 self.refresh()
 
     def show_constructor_window(self, edit_sku=None):
-        """Окно создания/редактирования набора (Конструктор)"""
         window = ctk.CTkToplevel(self)
         window.title("Конструктор")
         window.geometry("480x400") 
         window.attributes("-topmost", True)
         window.resizable(False, False)
 
-        # Подгружаем состав, если редактируем
         self.temp_content = catalog_service.get_item_content(edit_sku) if edit_sku else {}
 
-        # Поле SKU
+        # Поле SKU — МЕНЯЕМ НА OrdoEntry
         top_f = ctk.CTkFrame(window, fg_color="transparent")
         top_f.pack(fill="x", padx=15, pady=(10, 5))
         ctk.CTkLabel(top_f, text="SKU:", font=("Arial", 12, "bold")).pack(side="left")
-        sku_entry = ctk.CTkEntry(top_f, width=320, height=28, placeholder_text="Артикул набора...")
+        sku_entry = OrdoEntry(top_f, width=320, height=28, placeholder_text="Артикул набора...")
         sku_entry.pack(side="right")
         if edit_sku: 
             sku_entry.insert(0, edit_sku)
@@ -167,17 +159,17 @@ class CatalogFrame(ctk.CTkFrame):
         add_f.pack(fill="x", padx=15, pady=5)
         
         c_search_var = ctk.StringVar()
-        search_entry = ctk.CTkEntry(add_f, placeholder_text="Поиск детали...", width=240, height=28, textvariable=c_search_var)
+        # Поиск детали — МЕНЯЕМ НА OrdoEntry
+        search_entry = OrdoEntry(add_f, placeholder_text="Поиск детали...", width=240, height=28, textvariable=c_search_var)
         search_entry.grid(row=0, column=0, padx=(10, 5), pady=8)
         
-        qty_entry = ctk.CTkEntry(add_f, width=40, height=28)
+        # Количество — МЕНЯЕМ НА OrdoEntry
+        qty_entry = OrdoEntry(add_f, width=40, height=28)
         qty_entry.insert(0, "1")
         qty_entry.grid(row=0, column=1, padx=5)
 
-        # Выпадающий список результатов поиска
         search_results_frame = ctk.CTkScrollableFrame(window, height=70, fg_color="#1e1e1e", border_width=1, border_color="#3b8ed0")
         
-        # Список уже добавленных частей
         parts_list_frame = ctk.CTkScrollableFrame(window, height=140, label_text="Состав")
         parts_list_frame.pack(fill="both", expand=True, padx=15, pady=5)
 
@@ -242,7 +234,7 @@ class CatalogFrame(ctk.CTkFrame):
             res = catalog_service.save_item(main_sku, self.temp_content)
             if res.get("status") == "success":
                 window.destroy()
-                self.refresh() # Обновляем список в основном окне
+                self.refresh()
             else:
                 messagebox.showerror("Ошибка", res.get('message'))
 

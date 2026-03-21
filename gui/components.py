@@ -1,48 +1,57 @@
 import customtkinter as ctk
 
-# Обычное поле с хоткеями
 class OrdoEntry(ctk.CTkEntry):
     def __init__(self, master, **kwargs):
         super().__init__(master, **kwargs)
-        events = ["<Control-v>", "<Control-V>", "<Control-a>", "<Control-A>", "<Control-c>", "<Control-C>"]
-        for event in events:
-            self.bind(event, self._handle_shortcuts)
-            self._entry.bind(event, self._handle_shortcuts)
+        # Привязываем событие ко всему окну, но только когда фокус на этом поле
+        # Это самый мощный способ заставить хоткеи работать
+        self._entry.bind("<KeyPress>", self._check_hotkeys)
 
-    def _handle_shortcuts(self, event):
-        key = event.keysym.lower()
-        if key == "v": return self._custom_paste()
-        elif key == "a": return self._select_all()
-        elif key == "c": return self._custom_copy()
+    def _check_hotkeys(self, event):
+        # Проверяем, нажат ли Control (маска 4)
+        ctrl_pressed = (event.state & 0x4) != 0
+        
+        # Физические коды клавиш (не зависят от языка): 86=V, 67=C, 65=A
+        if ctrl_pressed:
+            if event.keycode == 86 or event.keysym.lower() in ('v', 'м'):
+                self._force_paste()
+                return "break"
+            elif event.keycode == 67 or event.keysym.lower() in ('c', 'с'):
+                self._force_copy()
+                return "break"
+            elif event.keycode == 65 or event.keysym.lower() in ('a', 'ф'):
+                self._force_select_all()
+                return "break"
 
-    def _custom_paste(self, event=None):
+    def _force_paste(self):
         try:
-            text = self.clipboard_get()
+            # Берем текст из буфера обмена через встроенный метод tkinter
+            text = self.focus_get().clipboard_get()
             if text:
-                if self.selection_present():
-                    self.delete("sel.first", "sel.last")
-                self.insert("insert", text)
-        except: pass
-        return "break"
+                # Если текст выделен — заменяем его
+                if self._entry.selection_present():
+                    self._entry.delete("sel.first", "sel.last")
+                self._entry.insert("insert", text)
+        except:
+            pass
 
-    def _custom_copy(self, event=None):
-        if self.selection_present():
-            try:
-                text = self.get()[self.index("sel.first"):self.index("sel.last")]
+    def _force_copy(self):
+        try:
+            if self._entry.selection_present():
+                selected_text = self._entry.get()[self._entry.index("sel.first"):self._entry.index("sel.last")]
                 self.clipboard_clear()
-                self.clipboard_append(text)
-            except: pass
-        return "break"
+                self.clipboard_append(selected_text)
+        except:
+            pass
 
-    def _select_all(self, event=None):
-        self.select_range(0, "end")
-        self.icursor("end")
-        return "break"
-    
+    def _force_select_all(self):
+        self._entry.tag_add("sel", "0", "end")
+        self._entry.mark_set("insert", "end")
+        self._entry.focus_set()
 
-class SmartSearchEntry(ctk.CTkEntry):
+class SmartSearchEntry(OrdoEntry):
     def __init__(self, master, placeholder_text="Поиск...", width=300, **kwargs):
-        # Работаем с переменной (либо переданной, либо создаем свою)
+        # Извлекаем переменную поиска, если она передана
         self.internal_var = kwargs.get("textvariable") or ctk.StringVar()
         if "textvariable" in kwargs:
             del kwargs["textvariable"]
@@ -57,32 +66,19 @@ class SmartSearchEntry(ctk.CTkEntry):
         
         self.on_search_callbacks = []
         self._after_id = None
-        # Вешаем отслеживание ввода
         self.internal_var.trace_add("write", self._on_type)
 
     def _on_type(self, *args):
-        """Метод вызывается при каждом изменении текста."""
-        # Если таймер уже запущен — сбрасываем (дебаунсинг)
         if self._after_id:
             self.after_cancel(self._after_id)
-        
-        # Запускаем таймер на 400мс. Поиск сработает, только если ты перестанешь печатать.
         self._after_id = self.after(400, self._execute_search)
 
     def _execute_search(self):
-        """Реальное выполнение поиска после паузы."""
         query = self.internal_var.get().strip().lower()
-        
-        # ЖЕСТКОЕ УСЛОВИЕ:
-        # 1. Если поле пустое (сброс поиска) — вызываем обновление.
-        # 2. Если введено 3 и более символов — вызываем обновление.
-        # В остальных случаях (1-2 символа) программа просто молчит.
         if len(query) == 0 or len(query) >= 3:
             for callback in self.on_search_callbacks:
                 callback()
-        
         self._after_id = None
 
     def bind_search(self, callback):
-        """Регистрирует внешнюю функцию (например, refresh из InventoryFrame)."""
         self.on_search_callbacks.append(callback)

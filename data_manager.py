@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import database
+import sqlite3
 from datetime import datetime
 
 def get_base_path():
@@ -13,183 +14,125 @@ def get_base_path():
 BASE_DIR = get_base_path()
 DB_PATH = os.path.join(BASE_DIR, 'ordo_v2.db')
 
-# --- СОВМЕСТИМОСТЬ СО СТАРЫМ КОДОМ ---
+# --- ПРЯМАЯ РАБОТА С SQL ---
 
 def load_json(key):
-    """Имитирует загрузку JSON, забирая данные из SQLite."""
+    """Быстрая загрузка данных через SQL. Поддерживает все ключи приложения."""
+    conn = database.get_connection()
+    cursor = conn.cursor()
     try:
         if key == 'inventory':
-            return _db_load_inventory()
+            cursor.execute('SELECT sku, quantity FROM inventory')
+            return {row[0]: row[1] for row in cursor.fetchall()}
+        
         elif key in ('recipes', 'catalog'):
-            return _db_load_recipes()
+            cursor.execute('SELECT sku, content FROM recipes')
+            data = {}
+            for row in cursor.fetchall():
+                try:
+                    # Проверяем, JSON это (состав набора) или просто строка (SIMPLE)
+                    data[row[0]] = json.loads(row[1])
+                except (json.JSONDecodeError, TypeError):
+                    data[row[0]] = row[1]
+            return data
+        
         elif key == 'recent_300':
-            return _db_load_recent()
+            cursor.execute('SELECT sku FROM recent_items ORDER BY last_used DESC LIMIT 300')
+            return [row[0] for row in cursor.fetchall()]
+        
         elif key == 'history':
-            return _db_load_history()
+            cursor.execute('SELECT date, filename, status, details FROM history ORDER BY id DESC')
+            return [{'date': r[0], 'filename': r[1], 'status': r[2], 'details': json.loads(r[3])} for r in cursor.fetchall()]
     except Exception as e:
-        print(f"Ошибка получения данных {key} из базы: {e}")
+        print(f"SQL Load Error ({key}): {e}")
+    finally:
+        conn.close()
+    return {}
+
+def update_inventory_batch(updates):
+    """Пакетное обновление инвентаря. Создает запись, если SKU новый."""
+    if not updates: return
     
-    return [] if key == 'recent_300' else {}
-
-def save_json(key, data):
-    """Имитирует сохранение JSON с использованием массовых операций."""
+    conn = database.get_connection()
+    cursor = conn.cursor()
     try:
-        if key == 'inventory':
-            _db_sync_inventory(data)
-        elif key in ('recipes', 'catalog'):
-            _db_sync_recipes(data)
-        elif key == 'recent_300':
-            _db_save_recent(data)
+        cursor.execute('BEGIN TRANSACTION')
+        # Используем INSERT OR REPLACE вместо UPDATE, чтобы новые товары из Excel/Каталога сохранялись
+        data_to_update = [(sku, qty) for sku, qty in updates.items()]
+        cursor.executemany('INSERT OR REPLACE INTO inventory (sku, quantity) VALUES (?, ?)', data_to_update)
+        conn.commit()
     except Exception as e:
-        print(f"Ошибка сохранения данных {key} в базу: {e}")
+        if conn: conn.rollback()
+        print(f"Ошибка SQL Inventory Batch: {e}")
+    finally:
+        conn.close()
 
-# --- ФУНКЦИИ УДАЛЕНИЯ ---
+def update_recipes_batch(updates):
+    """Пакетное обновление рецептов (составов наборов)."""
+    if not updates: return
+    
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('BEGIN TRANSACTION')
+        data_to_update = []
+        for sku, content in updates.items():
+            val = json.dumps(content) if isinstance(content, dict) else content
+            data_to_update.append((sku, val))
+            
+        cursor.executemany('INSERT OR REPLACE INTO recipes (sku, content) VALUES (?, ?)', data_to_update)
+        conn.commit()
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"Ошибка SQL Recipes Batch: {e}")
+    finally:
+        conn.close()
 
-def delete_item_from_inventory(sku):
-    """Точечное удаление товара из склада."""
+def add_history_record(filename, status, details):
+    """Запись в таблицу истории."""
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            INSERT INTO history (date, filename, status, details)
+            VALUES (?, ?, ?, ?)
+        ''', (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), filename, status, json.dumps(details)))
+        conn.commit()
+    finally:
+        conn.close()
+
+# --- МЕТОДЫ УДАЛЕНИЯ ---
+
+def delete_inventory_item(sku):
+    """Удаление только из таблицы склада."""
     conn = database.get_connection()
     cursor = conn.cursor()
     cursor.execute('DELETE FROM inventory WHERE sku = ?', (sku,))
     conn.commit()
     conn.close()
 
-def delete_item_from_catalog(sku):
-    """Точечное удаление набора из каталога."""
+def delete_recipe_item(sku):
+    """Удаление только из таблицы рецептов."""
     conn = database.get_connection()
     cursor = conn.cursor()
     cursor.execute('DELETE FROM recipes WHERE sku = ?', (sku,))
     conn.commit()
     conn.close()
 
-# --- ВНУТРЕННИЕ ФУНКЦИИ РАБОТЫ С БД (ОПТИМИЗИРОВАННЫЕ) ---
-
-def _db_load_inventory():
-    conn = database.get_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT sku, quantity FROM inventory')
-    data = {row[0]: row[1] for row in cursor.fetchall()}
-    conn.close()
-    return data
-
-def _db_sync_inventory(data):
-    """Массовая синхронизация склада."""
-    conn = database.get_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute('BEGIN TRANSACTION')
-        
-        # Удаление лишних
-        cursor.execute('SELECT sku FROM inventory')
-        db_skus = {row[0] for row in cursor.fetchall()}
-        to_delete = [(sku,) for sku in (db_skus - set(data.keys()))]
-        if to_delete:
-            cursor.executemany('DELETE FROM inventory WHERE sku = ?', to_delete)
-        
-        # Массовое обновление/вставка
-        to_update = list(data.items())
-        if to_update:
-            cursor.executemany('INSERT OR REPLACE INTO inventory (sku, quantity) VALUES (?, ?)', to_update)
-            
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
-
-def _db_load_recipes():
-    conn = database.get_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT sku, content FROM recipes')
-    data = {row[0]: json.loads(row[1]) for row in cursor.fetchall()}
-    conn.close()
-    return data
-
-def _db_sync_recipes(data):
-    """Массовая синхронизация рецептов."""
-    conn = database.get_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute('BEGIN TRANSACTION')
-        
-        cursor.execute('SELECT sku FROM recipes')
-        db_skus = {row[0] for row in cursor.fetchall()}
-        to_delete = [(sku,) for sku in (db_skus - set(data.keys()))]
-        if to_delete:
-            cursor.executemany('DELETE FROM recipes WHERE sku = ?', to_delete)
-        
-        # Подготовка данных: SKU и JSON-строка контента
-        to_update = [(sku, json.dumps(content)) for sku, content in data.items()]
-        if to_update:
-            cursor.executemany('INSERT OR REPLACE INTO recipes (sku, content) VALUES (?, ?)', to_update)
-            
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
-
-def _db_load_recent():
-    conn = database.get_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT sku FROM recent_items ORDER BY last_used DESC LIMIT 300')
-    data = [row[0] for row in cursor.fetchall()]
-    conn.close()
-    return data
-
-def _db_save_recent(skus):
-    """Массовое сохранение недавних товаров."""
-    conn = database.get_connection()
-    cursor = conn.cursor()
-    now = datetime.now().isoformat()
-    try:
-        cursor.execute('BEGIN TRANSACTION')
-        to_save = [(sku, now) for sku in skus]
-        cursor.executemany('INSERT OR REPLACE INTO recent_items (sku, last_used) VALUES (?, ?)', to_save)
-        conn.commit()
-    except:
-        conn.rollback()
-    finally:
-        conn.close()
-
-def _db_load_history():
-    conn = database.get_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT date, filename, status, details FROM history ORDER BY id DESC')
-    result = []
-    for row in cursor.fetchall():
-        result.append({
-            'date': row[0],
-            'filename': row[1],
-            'status': row[2],
-            'details': json.loads(row[3])
-        })
-    conn.close()
-    return result
+# --- ВСПОМОГАТЕЛЬНЫЕ ---
 
 def update_recent_300(skus):
-    """Оптимизированное обновление списка последних товаров."""
-    if isinstance(skus, str):
-        skus = [skus]
-    
+    if not skus: return
+    if isinstance(skus, str): skus = [skus]
     conn = database.get_connection()
     cursor = conn.cursor()
     now = datetime.now().isoformat()
-    
     try:
         cursor.execute('BEGIN TRANSACTION')
-        # Фильтруем только те SKU, что есть в инвентаре
-        placeholders = ','.join(['?'] * len(skus))
-        cursor.execute(f'SELECT sku FROM inventory WHERE sku IN ({placeholders})', skus)
-        existing_skus = [row[0] for row in cursor.fetchall()]
-        
-        if existing_skus:
-            to_update = [(sku, now) for sku in existing_skus]
-            cursor.executemany('INSERT OR REPLACE INTO recent_items (sku, last_used) VALUES (?, ?)', to_update)
-        
+        to_update = [(sku, now) for sku in skus]
+        cursor.executemany('INSERT OR REPLACE INTO recent_items (sku, last_used) VALUES (?, ?)', to_update)
         conn.commit()
     except:
-        conn.rollback()
+        if conn: conn.rollback()
     finally:
         conn.close()

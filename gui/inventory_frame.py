@@ -2,7 +2,7 @@ import customtkinter as ctk
 import data_manager
 import warehouse_service 
 from tkinter import messagebox
-from .components import SmartSearchEntry
+from .components import SmartSearchEntry, OrdoEntry
 
 class InventoryFrame(ctk.CTkFrame):
     def __init__(self, master, search_var, copy_func, **kwargs):
@@ -10,10 +10,12 @@ class InventoryFrame(ctk.CTkFrame):
         self.search_var = search_var
         self.copy_to_clipboard = copy_func
         
-        # КЭШ: Сюда загружаем данные один раз
         self._inventory_cache = {}
         self._filtered_skus = []
-        self._after_id = None  # Для контроля задержки отрисовки
+        self._after_id = None 
+        
+        # Ссылки на виджеты: { "SKU": {"row": frame, "entry": entry} }
+        self._row_widgets = {}
         
         self.current_page = 0
         self.items_per_page = 50
@@ -34,13 +36,17 @@ class InventoryFrame(ctk.CTkFrame):
         )
         self.export_btn.pack(side="left", padx=20)
 
+        self.sync_btn = ctk.CTkButton(
+            left_header, text="🔄", width=40, height=32,
+            fg_color="#3b8ed0", command=self.full_reload_and_refresh
+        )
+        self.sync_btn.pack(side="left")
+
         self.search_entry = SmartSearchEntry(
             header_frame, placeholder_text="🔍 Поиск (от 3-х симв.)...", 
             width=300, textvariable=self.search_var 
         )
         self.search_entry.pack(side="right")
-        
-        # Привязываем сброс пагинации к поиску
         self.search_entry.bind_search(self._reset_pagination)
 
         self.scroll_frame = ctk.CTkScrollableFrame(self, width=800, height=450)
@@ -56,23 +62,36 @@ class InventoryFrame(ctk.CTkFrame):
         self.next_btn = ctk.CTkButton(self.pagination_frame, text="Вперед >", width=80, command=self._next_page)
         self.next_btn.pack(side="right", padx=10)
 
-        # Первая загрузка
+        # Обновляем при переключении на вкладку
+        self.bind("<Visibility>", lambda e: self.full_reload_and_refresh())
+        
         self.full_reload_and_refresh()
 
+    def update_sku_ui(self, sku, new_qty):
+        """Точечное обновление данных товара на экране без перерисовки всего списка."""
+        new_qty = int(new_qty)
+        self._inventory_cache[sku] = new_qty
+        
+        if sku in self._row_widgets:
+            widgets = self._row_widgets[sku]
+            
+            # Обновляем текст в поле ввода
+            widgets["entry"].delete(0, 'end')
+            widgets["entry"].insert(0, str(new_qty))
+            
+            # Подсветка дефицита (меньше 5 штук — красный фон)
+            card_color = "#3b1e1e" if new_qty < 5 else "#2b2b2b"
+            widgets["row"].configure(fg_color=card_color)
+
     def full_reload_and_refresh(self):
-        """Полная принудительная загрузка данных из базы."""
+        """Полная синхронизация с базой данных SQL."""
         self._inventory_cache = data_manager.load_json('inventory')
         self.refresh()
 
     def _reset_pagination(self, *args):
-        """Вызывается SmartSearchEntry, когда нужно обновить результаты."""
         self.current_page = 0
-        
-        # Если была запланирована отрисовка — отменяем
         if self._after_id:
             self.after_cancel(self._after_id)
-        
-        # Планируем отрисовку через 300 мс после последнего сигнала от поиска
         self._after_id = self.after(300, self.refresh)
 
     def _prev_page(self):
@@ -86,43 +105,44 @@ class InventoryFrame(ctk.CTkFrame):
             self.render_items()
 
     def manual_update_stock(self, sku, new_qty_str):
-        if not new_qty_str.isdigit(): return
-        # Сохраняем в базу
-        inventory = data_manager.load_json('inventory')
-        inventory[sku] = int(new_qty_str)
-        data_manager.save_json('inventory', inventory)
+        """Ручное изменение остатка через иконку дискеты."""
+        if not new_qty_str.strip().replace('-', '').isdigit(): 
+            messagebox.showwarning("Ошибка", "Введите число")
+            return
+            
+        new_qty = int(new_qty_str)
         
-        # Обновляем локальный кэш, чтобы мгновенно увидеть изменения без перезагрузки всей базы
-        self._inventory_cache[sku] = int(new_qty_str)
-        self.render_items()
+        # SQL UPDATE: обновляем только ОДНУ строку в базе
+        data_manager.update_inventory_batch({sku: new_qty})
+        data_manager.update_recent_300(sku)
+        
+        # Мгновенно обновляем интерфейс
+        self.update_sku_ui(sku, new_qty)
 
     def refresh(self):
-        """Фильтрация данных в памяти."""
+        """Фильтрация данных перед отрисовкой."""
         if not self.winfo_exists(): return
         
         query = self.search_var.get().strip().lower()
         
-        # Если в кэше пусто (например, при старте)
+        # Если кэш пуст (например, при первом запуске), загружаем
         if not self._inventory_cache:
             self._inventory_cache = data_manager.load_json('inventory')
 
-        # Фильтруем список ключей (SKU)
         if len(query) >= 3:
             self._filtered_skus = [sku for sku in sorted(self._inventory_cache.keys()) 
                                    if query in sku.lower()]
-        elif len(query) == 0:
-            self._filtered_skus = sorted(self._inventory_cache.keys())
         else:
-            # Если 1-2 символа, мы не обновляем список (оставляем старый или пустой)
-            return
+            self._filtered_skus = sorted(self._inventory_cache.keys())
         
         self.render_items()
 
     def render_items(self):
-        """Тяжелая функция отрисовки виджетов."""
-        # Очистка
+        """Отрисовка карточек товаров текущей страницы."""
         for widget in self.scroll_frame.winfo_children():
             widget.destroy()
+
+        self._row_widgets = {}
 
         start_idx = self.current_page * self.items_per_page
         end_idx = start_idx + self.items_per_page
@@ -139,7 +159,6 @@ class InventoryFrame(ctk.CTkFrame):
             ctk.CTkLabel(self.scroll_frame, text=msg, text_color="gray").pack(pady=20)
             return
 
-        # Генерация карточек
         for sku in items_to_display:
             qty = self._inventory_cache.get(sku, 0)
             card_color = "#3b1e1e" if qty < 5 else "#2b2b2b"
@@ -147,18 +166,28 @@ class InventoryFrame(ctk.CTkFrame):
             row = ctk.CTkFrame(self.scroll_frame, fg_color=card_color, corner_radius=6)
             row.pack(fill="x", pady=2, padx=5)
             
+            # Кнопка копирования
             ctk.CTkButton(row, text="📋", width=30, height=30, fg_color="transparent", 
                           command=lambda s=sku: self.copy_to_clipboard(s)).pack(side="left", padx=5)
             
+            # Название SKU
             ctk.CTkLabel(row, text=sku, font=("Arial", 14), anchor="w").pack(side="left", padx=5, pady=10)
             
+            # Блок редактирования
             edit_frame = ctk.CTkFrame(row, fg_color="transparent")
             edit_frame.pack(side="right", padx=10)
             
-            qty_edit = ctk.CTkEntry(edit_frame, width=60, height=28, justify="center")
+            qty_edit = OrdoEntry(edit_frame, width=60, height=28, justify="center")
             qty_edit.insert(0, str(qty))
             qty_edit.pack(side="left", padx=5)
             
+            # Сохраняем ссылки для точечного обновления
+            self._row_widgets[sku] = {
+                "row": row,
+                "entry": qty_edit
+            }
+            
+            # Кнопка сохранения (дискета)
             ctk.CTkButton(edit_frame, text="💾", width=30, height=28, fg_color="#27ae60", 
                           command=lambda s=sku, e=qty_edit: self.manual_update_stock(s, e.get())).pack(side="left")
 

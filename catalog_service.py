@@ -1,15 +1,17 @@
 import data_manager
 import pandas as pd
+import json
 
 def get_all_items():
-    """Загружает весь каталог (артикулы и их составы)"""
+    """Загружает весь каталог (артикулы и их составы) из SQL."""
     return data_manager.load_json('recipes')
 
 def get_item_content(sku):
-    """Возвращает состав артикула. Если там "SIMPLE" или строка — возвращает {}."""
+    """Возвращает состав артикула."""
     catalog = data_manager.load_json('recipes')
     item = catalog.get(sku, {})
     
+    # Если это строка (например "SIMPLE"), возвращаем пустой словарь состава
     if isinstance(item, str):
         return {}
     
@@ -17,85 +19,91 @@ def get_item_content(sku):
 
 def save_item(sku, content):
     """
-    Сохраняет артикул. 
-    Одиночные товары (content={}) попадают в каталог как "SIMPLE" и в инвентарь.
-    Наборы (content={...}) попадают только в каталог.
+    Сохраняет артикул в SQL.
+    Одиночные товары (content={}) попадают в recipes как "SIMPLE" и добавляются в inventory.
+    Наборы (content={...}) попадают только в recipes.
     """
     try:
         sku_stripped = sku.strip()
-        catalog = data_manager.load_json('recipes')
         
         # 1. ОПРЕДЕЛЯЕМ ТИП ТОВАРА
-        is_kit = bool(content) # Если словарь состава не пустой — это набор
+        is_kit = bool(content) 
         final_value = content if is_kit else "SIMPLE"
         
-        # 2. СОХРАНЯЕМ В КАТАЛОГ (всегда)
-        catalog[sku_stripped] = final_value
-        data_manager.save_json('recipes', catalog)
-        print(f"DEBUG: {sku_stripped} сохранен в каталог как {'НАБОР' if is_kit else 'SIMPLE'}")
-
+        # 2. СОХРАНЯЕМ В КАТАЛОГ (таблица recipes)
+        # Мы передаем словарь из одного элемента в пакетный метод
+        data_manager.update_recipes_batch({sku_stripped: final_value})
+        
         # 3. РАБОТА С ИНВЕНТАРЕМ
         inventory = data_manager.load_json('inventory')
         
         if not is_kit:
-            # Если это одиночный товар, и его нет в инвентаре — добавляем
+            # Если это одиночный товар и его нет в инвентаре — создаем запись с 0
             if sku_stripped not in inventory:
-                inventory[sku_stripped] = 0
-                data_manager.save_json('inventory', inventory)
-                print(f"DEBUG: Одиночный товар {sku_stripped} добавлен на склад")
+                data_manager.update_inventory_batch({sku_stripped: 0})
         else:
-            # Если мы превратили старый одиночный товар в набор — удаляем его из инвентаря
+            # Если превратили одиночный товар в набор — удаляем его из остатков склада
             if sku_stripped in inventory:
-                del inventory[sku_stripped]
-                data_manager.save_json('inventory', inventory)
-                print(f"DEBUG: {sku_stripped} стал набором и удален из списка остатков склада")
+                data_manager.delete_inventory_item(sku_stripped)
             
         return {"status": "success"}
     except Exception as e:
-        print(f"DEBUG: Ошибка при сохранении: {e}")
+        print(f"DEBUG: Ошибка при сохранении в SQL: {e}")
         return {"status": "error", "message": str(e)}
 
 def delete_item(sku):
-    """Полное удаление артикула из всей системы"""
+    """Полное удаление артикула из SQL таблиц recipes и inventory."""
     try:
-        # Удаляем из каталога
-        catalog = data_manager.load_json('recipes')
-        if sku in catalog:
-            del catalog[sku]
-            data_manager.save_json('recipes', catalog)
-
-        # Удаляем из инвентаря (если он там был)
-        inventory = data_manager.load_json('inventory')
-        if sku in inventory:
-            del inventory[sku]
-            data_manager.save_json('inventory', inventory)
-            
+        # Удаляем из обеих таблиц через методы data_manager
+        data_manager.delete_recipe_item(sku)
+        data_manager.delete_inventory_item(sku)
         return True
     except Exception as e:
-        print(f"DEBUG: Ошибка при удалении: {e}")
+        print(f"DEBUG: Ошибка при удалении из SQL: {e}")
         return False
 
 def process_catalog_excel(file_path):
-    """Массовый импорт одиночных товаров (всегда SIMPLE и всегда в инвентарь)"""
+    """Массовый импорт новых товаров из Excel (всегда SIMPLE)."""
     try:
-        df = pd.read_excel(file_path, header=None)
+        df = pd.read_excel(file_path, header=None, dtype=str)
+        
+        # Загружаем текущее состояние для проверки на дубликаты
         catalog = data_manager.load_json('recipes')
         inventory = data_manager.load_json('inventory')
+        
+        new_recipes = {}
+        new_inventory = {}
         count = 0
         
         for _, row in df.iterrows():
-            raw_sku = str(row.iloc[0]).strip()
-            if raw_sku and raw_sku.lower() != "nan" and raw_sku != "":
-                # Для Excel-импорта мы по умолчанию считаем всё одиночными запчастями
+            val = row.iloc[0]
+            if pd.isna(val): continue
+                
+            raw_sku = str(val).strip()
+            if raw_sku.endswith('.0'): raw_sku = raw_sku[:-2]
+
+            if raw_sku and raw_sku.lower() != "nan":
+                is_new = False
+                
                 if raw_sku not in catalog:
-                    catalog[raw_sku] = "SIMPLE"
+                    new_recipes[raw_sku] = "SIMPLE"
+                    is_new = True
+                
                 if raw_sku not in inventory:
-                    inventory[raw_sku] = 0
+                    new_inventory[raw_sku] = 0
+                    is_new = True
+                
+                if is_new:
                     count += 1
                     
-        data_manager.save_json('recipes', catalog)
-        data_manager.save_json('inventory', inventory)
+        # Пакетное сохранение в SQL
+        if new_recipes:
+            data_manager.update_recipes_batch(new_recipes)
+        if new_inventory:
+            data_manager.update_inventory_batch(new_inventory)
+            
+        print(f"DEBUG: SQL Импорт завершен. Новых позиций: {count}")
         return {"status": "success", "count": count}
     except Exception as e:
-        print(f"DEBUG: Ошибка Excel: {e}")
+        print(f"DEBUG: Ошибка SQL Excel импорта: {e}")
         return {"status": "error", "message": str(e)}
