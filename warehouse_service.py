@@ -2,24 +2,122 @@ import pandas as pd
 import data_manager
 from tkinter import filedialog
 from datetime import datetime
+import os
 import json
 
+def get_all_skus():
+    """Возвращает отсортированный список всех SKU из каталога (таблица recipes)."""
+    try:
+        recipes = data_manager.load_json('recipes')
+        if not recipes:
+            return []
+        return sorted(list(recipes.keys()))
+    except Exception as e:
+        print(f"Ошибка получения списка SKU для интерфейса: {e}")
+        return []
+
+# --- ФУНКЦИЯ ЗАМЕНЫ ---
+def swap_items(sku_from, sku_to, qty):
+    try:
+        inventory = data_manager.load_json('inventory')
+        sku_from = sku_from.strip()
+        sku_to = sku_to.strip()
+        
+        if sku_from == sku_to:
+            return {"status": "error", "message": "Выбраны одинаковые артикулы."}
+            
+        old_from = inventory.get(sku_from, 0)
+        old_to = inventory.get(sku_to, 0)
+        
+        new_qty_from = old_from - qty
+        new_qty_to = old_to + qty
+        
+        updates = {sku_from: new_qty_from, sku_to: new_qty_to}
+        old_stocks = {sku_from: old_from, sku_to: old_to}
+        
+        data_manager.update_inventory_batch(updates)
+        data_manager.update_recent_300(list(updates.keys()))
+
+        # ЗАПИСЬ В ИСТОРИЮ (Было -> Стало)
+        data_manager.add_history_record(
+            filename="Ручная замена",
+            status="Успех",
+            details={"Изменения": updates, "Было": old_stocks, "тип": "замена"}
+        )
+        
+        return {
+            "status": "success", 
+            "message": f"Замена выполнена:\n{sku_from} ({new_qty_from})\n{sku_to} ({new_qty_to})",
+            "updated_inventory": updates 
+        }
+    except Exception as e:
+        print(f"!!! КРИТИЧЕСКАЯ ОШИБКА SQL: {e}") 
+        return {"status": "error", "message": f"SQL Error: {str(e)}"}
+    
+# --- ФУНКЦИЯ ПРИХОДА ---
+def add_supply(sku, qty):
+    try:
+        inventory = data_manager.load_json('inventory')
+        sku = sku.strip()
+        
+        old_qty = inventory.get(sku, 0) # Фиксируем СТРОГО до изменения
+        new_qty = old_qty + qty
+        
+        updates = {sku: new_qty}
+        old_stocks = {sku: old_qty}
+        
+        data_manager.update_inventory_batch(updates)
+        data_manager.update_recent_300([sku])
+
+        data_manager.add_history_record(
+            filename="Ручной приход",
+            status="Успех",
+            details={"Изменения": updates, "Было": old_stocks, "тип": "приход"}
+        )
+        
+        return {
+            "status": "success",
+            "message": f"Принято: {sku} (+{qty})",
+            "updated_inventory": updates
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Ошибка прихода: {e}"}
+
+# --- ФУНКЦИЯ БРАКА ---
+def report_defect(sku, qty):
+    try:
+        inventory = data_manager.load_json('inventory')
+        sku = sku.strip()
+        
+        old_qty = inventory.get(sku, 0) # Фиксируем СТРОГО до изменения
+        new_qty = old_qty - qty
+        
+        updates = {sku: new_qty}
+        old_stocks = {sku: old_qty}
+        
+        data_manager.update_inventory_batch(updates)
+        data_manager.update_recent_300([sku])
+
+        data_manager.add_history_record(
+            filename="Списание брака",
+            status="Дефицит" if new_qty < 0 else "Успех",
+            details={"Изменения": updates, "Было": old_stocks, "тип": "брак"}
+        )
+        
+        return {
+            "status": "success",
+            "message": f"Списан брак: {sku} (Остаток: {new_qty})",
+            "updated_inventory": updates
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Ошибка списания: {e}"}
+
+# --- ПРОЦЕССИНГ ЗАКАЗОВ ---
+# --- ПРОЦЕССИНГ ЗАКАЗОВ ---
 def process_morning_orders(filename):
-    """Обработка заказов с агрегацией и расширенной диагностикой."""
     recipes = data_manager.load_json('recipes')
     inventory = data_manager.load_json('inventory')
     
-    # --- БЛОК ПРОВЕРКИ БАЗЫ ---
-    print("\n" + "="*50)
-    print(f"DIAGNOSTIC: Загружено из БД {len(inventory)} артикулов инвентаря.")
-    print(f"DIAGNOSTIC: Загружено из БД {len(recipes)} рецептов/каталога.")
-    if inventory:
-        print(f"DIAGNOSTIC: Пример SKU в базе: '{list(inventory.keys())[0]}'")
-    else:
-        print("WARNING: БАЗА ИНВЕНТАРЯ ПУСТА!")
-    print("="*50 + "\n")
-    # --------------------------
-
     try:
         if filename.endswith('.xlsx'):
             df = pd.read_excel(filename, header=None, dtype=str)
@@ -29,7 +127,6 @@ def process_morning_orders(filename):
         return {"status": "error", "message": f"Ошибка открытия файла: {e}"}
 
     total_file_demands = {}
-    
     for col_idx in range(0, df.shape[1], 4):
         if col_idx + 2 < df.shape[1]:
             block = df.iloc[:, [col_idx + 1, col_idx + 2]].dropna()
@@ -48,54 +145,85 @@ def process_morning_orders(filename):
     processed_count = 0
     errors = []
     updated_items = {} 
+    old_stocks = {} 
 
-    # 2. РАСЧЕТ
+    # Работаем с копией инвентаря для расчетов
+    current_inv_state = inventory.copy()
+
     for order_sku, total_qty in total_file_demands.items():
-        # ПРОВЕРКА 1: Есть ли вообще такой артикул в каталоге?
         if order_sku not in recipes:
-            err = f"Ошибка: '{order_sku}' отсутствует в КАТАЛОГЕ"
-            errors.append(err)
-            print(err)
+            errors.append(f"Ошибка: '{order_sku}' отсутствует в КАТАЛОГЕ")
             continue
 
         recipe = recipes[order_sku]
+        # Если рецепт "SIMPLE", списываем сам артикул, иначе — ингредиенты
         items_to_deduct = {order_sku: total_qty} if recipe == "SIMPLE" else {k: v * total_qty for k, v in recipe.items()}
 
-        can_fulfill = True
         for item, q_needed in items_to_deduct.items():
-            # ПРОВЕРКА 2: Есть ли артикул в инвентаре и хватает ли остатка?
-            current_stock = inventory.get(item)
+            # Фиксируем состояние "БЫЛО" только один раз для каждого SKU
+            if item not in old_stocks:
+                old_stocks[item] = current_inv_state.get(item, 0)
+                
+            current_stock = current_inv_state.get(item, 0)
+            new_stock = current_stock - q_needed
             
-            if current_stock is None:
-                can_fulfill = False
-                err = f"Дефицит: '{item}' НЕТ В ТАБЛИЦЕ ИНВЕНТАРЯ"
-                errors.append(err)
-                print(err)
-                break
+            current_inv_state[item] = new_stock
+            updated_items[item] = new_stock
             
-            if current_stock < q_needed:
-                can_fulfill = False
-                err = f"Дефицит: '{item}' (нужно {q_needed}, в базе {current_stock})"
-                errors.append(err)
-                print(err)
-                break
+            if new_stock < 0:
+                errors.append(f"Дефицит: '{item}' (остаток: {new_stock})")
         
-        if can_fulfill:
-            for item, q_needed in items_to_deduct.items():
-                inventory[item] -= q_needed
-                updated_items[item] = inventory[item]
-            processed_count += total_qty
+        processed_count += total_qty
 
-    # 3. ЗАПИСЬ
     if updated_items:
+        # Массовое обновление в базе
         data_manager.update_inventory_batch(updated_items)
         data_manager.update_recent_300(list(updated_items.keys()))
-    
-    print(f"\nИТОГ: Обработано {processed_count}, Ошибок: {len(errors)}")
+        
+        # СТРОГИЙ ФОРМАТ ДАННЫХ ДЛЯ ИСТОРИИ
+        history_details = {
+            "Было": old_stocks,
+            "Изменения": updated_items, 
+            "статистика": {
+                "позиций": len(total_file_demands),
+                "всего_шт": processed_count,
+                "ошибки": len([e for e in errors if "отсутствует" in e])
+            }
+        }
+
+        # Записываем в БД под именем файла заказов
+        data_manager.add_history_record(
+            filename=f"Заказы: {os.path.basename(filename)}",
+            status="Готово" if not errors else "Дефицит",
+            details=history_details
+        )
     
     return {
         "status": "success", 
         "processed": processed_count,
         "errors_count": len(errors),
-        "updated_inventory": updated_items 
+        "updated_inventory": updated_items,
+        "errors": errors 
     }
+
+def export_inventory_to_excel():
+    try:
+        inventory = data_manager.load_json('inventory')
+        if not inventory:
+            return {"status": "error", "message": "Склад пуст, нечего экспортировать."}
+        data = [{"Артикул": sku, "Остаток": qty} for sku, qty in sorted(inventory.items())]
+        df = pd.DataFrame(data)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+        default_filename = f"Остатки_склада_{timestamp}.xlsx"
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            initialfile=default_filename,
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            title="Выберите куда сохранить остатки"
+        )
+        if not file_path:
+            return {"status": "cancelled"}
+        df.to_excel(file_path, index=False)
+        return {"status": "success", "message": f"Файл успешно сохранен:\n{os.path.basename(file_path)}"}
+    except Exception as e:
+        return {"status": "error", "message": f"Ошибка при экспорте: {str(e)}"}

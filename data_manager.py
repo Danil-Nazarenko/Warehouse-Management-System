@@ -30,7 +30,6 @@ def load_json(key):
             data = {}
             for row in cursor.fetchall():
                 try:
-                    # Проверяем, JSON это (состав набора) или просто строка (SIMPLE)
                     data[row[0]] = json.loads(row[1])
                 except (json.JSONDecodeError, TypeError):
                     data[row[0]] = row[1]
@@ -41,6 +40,7 @@ def load_json(key):
             return [row[0] for row in cursor.fetchall()]
         
         elif key == 'history':
+            # Сортировка ORDER BY id DESC уже делает новые записи ПЕРВЫМИ в списке
             cursor.execute('SELECT date, filename, status, details FROM history ORDER BY id DESC')
             return [{'date': r[0], 'filename': r[1], 'status': r[2], 'details': json.loads(r[3])} for r in cursor.fetchall()]
     except Exception as e:
@@ -57,7 +57,6 @@ def update_inventory_batch(updates):
     cursor = conn.cursor()
     try:
         cursor.execute('BEGIN TRANSACTION')
-        # Используем INSERT OR REPLACE вместо UPDATE, чтобы новые товары из Excel/Каталога сохранялись
         data_to_update = [(sku, qty) for sku, qty in updates.items()]
         cursor.executemany('INSERT OR REPLACE INTO inventory (sku, quantity) VALUES (?, ?)', data_to_update)
         conn.commit()
@@ -89,15 +88,32 @@ def update_recipes_batch(updates):
         conn.close()
 
 def add_history_record(filename, status, details):
-    """Запись в таблицу истории."""
+    """Запись в таблицу истории с лимитом в 400 последних записей."""
     conn = database.get_connection()
     cursor = conn.cursor()
     try:
+        cursor.execute('BEGIN TRANSACTION')
+        
+        # 1. Добавляем новую запись
         cursor.execute('''
             INSERT INTO history (date, filename, status, details)
             VALUES (?, ?, ?, ?)
         ''', (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), filename, status, json.dumps(details)))
+        
+        # 2. Удаляем старые записи, оставляя только последние 400 по ID
+        cursor.execute('''
+            DELETE FROM history 
+            WHERE id NOT IN (
+                SELECT id FROM history 
+                ORDER BY id DESC 
+                LIMIT 400
+            )
+        ''')
+        
         conn.commit()
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"Ошибка при записи истории/очистке: {e}")
     finally:
         conn.close()
 
@@ -118,6 +134,19 @@ def delete_recipe_item(sku):
     cursor.execute('DELETE FROM recipes WHERE sku = ?', (sku,))
     conn.commit()
     conn.close()
+
+def clear_empty_history():
+    """Удаляет из базы пустые или некорректные записи истории."""
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    try:
+        # Удаляем всё, где нет нормальных деталей (пустые скобки или NULL)
+        cursor.execute("DELETE FROM history WHERE details = '{}' OR details IS NULL OR details = ''")
+        conn.commit()
+    except Exception as e:
+        print(f"Ошибка очистки истории: {e}")
+    finally:
+        conn.close()
 
 # --- ВСПОМОГАТЕЛЬНЫЕ ---
 

@@ -22,8 +22,8 @@ def add_supply(sku, amount):
         
         return {
             "status": "success", 
-            "new_balance": new_qty, 
-            "message": f"Успешно! {sku}: {new_qty}"
+            "message": f"Успешно! {sku}: {new_qty}",
+            "updated_inventory": {sku: new_qty}  # КЛЮЧЕВАЯ ПРАВКА: теперь UI обновится точечно
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -31,7 +31,7 @@ def add_supply(sku, amount):
 def process_excel_supply(file_path):
     """Логика массового прихода из Excel с одним SQL-запросом."""
     try:
-        # Читаем Excel. header=None, если в файле нет заголовков (просто SKU и Кол-во)
+        # Читаем Excel. header=None, если в файле нет заголовков
         df = pd.read_excel(file_path, header=None) 
         count = 0
         all_updates = {}
@@ -42,13 +42,12 @@ def process_excel_supply(file_path):
         for _, row in df.iterrows():
             try:
                 sku = str(row.iloc[0]).strip()
-                if sku.endswith('.0'): sku = sku[:-2] # Убираем хвосты от pandas
+                if sku.endswith('.0'): sku = sku[:-2]
                 
-                # Обработка количества (число или строка с запятой)
+                # Обработка количества
                 qty_raw = str(row.iloc[1]).replace(',', '.')
                 qty = int(float(qty_raw))
                 
-                # Проверяем, есть ли товар в каталоге, чтобы не плодить мусор в базе
                 if sku in recipes:
                     current = inventory.get(sku, 0)
                     inventory[sku] = current + qty
@@ -65,7 +64,7 @@ def process_excel_supply(file_path):
         return {
             "status": "success", 
             "count": count,
-            "updated_inventory": all_updates # Для мгновенного обновления UI
+            "updated_inventory": all_updates # Здесь уже было верно
         }
     except Exception as e:
         return {"status": "error", "message": f"Ошибка парсинга: {e}"}
