@@ -40,7 +40,6 @@ def load_json(key):
             return [row[0] for row in cursor.fetchall()]
         
         elif key == 'history':
-            # Сортировка ORDER BY id DESC уже делает новые записи ПЕРВЫМИ в списке
             cursor.execute('SELECT date, filename, status, details FROM history ORDER BY id DESC')
             return [{'date': r[0], 'filename': r[1], 'status': r[2], 'details': json.loads(r[3])} for r in cursor.fetchall()]
     except Exception as e:
@@ -49,10 +48,34 @@ def load_json(key):
         conn.close()
     return {}
 
+def get_active_skus_since(cutoff_date_str):
+    """Возвращает уникальный список SKU, активных с указанной даты (SQL-оптимизация)."""
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    active_skus = set()
+    try:
+        # Запрашиваем только колонку details и только для нужных дат
+        cursor.execute('SELECT details FROM history WHERE date >= ?', (cutoff_date_str,))
+        
+        for row in cursor.fetchall():
+            try:
+                details = json.loads(row[0])
+                # Собираем артикулы из ключей словарей "Было" и "Изменения"
+                if isinstance(details, dict):
+                    active_skus.update(details.get('Было', {}).keys())
+                    active_skus.update(details.get('Изменения', {}).keys())
+            except:
+                continue
+        return list(active_skus)
+    except Exception as e:
+        print(f"SQL Active SKUs Error: {e}")
+        return []
+    finally:
+        conn.close()
+
 def update_inventory_batch(updates):
-    """Пакетное обновление инвентаря. Создает запись, если SKU новый."""
+    """Пакетное обновление инвентаря."""
     if not updates: return
-    
     conn = database.get_connection()
     cursor = conn.cursor()
     try:
@@ -67,9 +90,8 @@ def update_inventory_batch(updates):
         conn.close()
 
 def update_recipes_batch(updates):
-    """Пакетное обновление рецептов (составов наборов)."""
+    """Пакетное обновление рецептов."""
     if not updates: return
-    
     conn = database.get_connection()
     cursor = conn.cursor()
     try:
@@ -78,7 +100,6 @@ def update_recipes_batch(updates):
         for sku, content in updates.items():
             val = json.dumps(content) if isinstance(content, dict) else content
             data_to_update.append((sku, val))
-            
         cursor.executemany('INSERT OR REPLACE INTO recipes (sku, content) VALUES (?, ?)', data_to_update)
         conn.commit()
     except Exception as e:
@@ -88,19 +109,16 @@ def update_recipes_batch(updates):
         conn.close()
 
 def add_history_record(filename, status, details):
-    """Запись в таблицу истории с лимитом в 400 последних записей."""
+    """Запись в историю с лимитом 400 записей."""
     conn = database.get_connection()
     cursor = conn.cursor()
     try:
         cursor.execute('BEGIN TRANSACTION')
-        
-        # 1. Добавляем новую запись
         cursor.execute('''
             INSERT INTO history (date, filename, status, details)
             VALUES (?, ?, ?, ?)
         ''', (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), filename, status, json.dumps(details)))
         
-        # 2. Удаляем старые записи, оставляя только последние 400 по ID
         cursor.execute('''
             DELETE FROM history 
             WHERE id NOT IN (
@@ -109,18 +127,14 @@ def add_history_record(filename, status, details):
                 LIMIT 400
             )
         ''')
-        
         conn.commit()
     except Exception as e:
         if conn: conn.rollback()
-        print(f"Ошибка при записи истории/очистке: {e}")
+        print(f"Ошибка при записи истории: {e}")
     finally:
         conn.close()
 
-# --- МЕТОДЫ УДАЛЕНИЯ ---
-
 def delete_inventory_item(sku):
-    """Удаление только из таблицы склада."""
     conn = database.get_connection()
     cursor = conn.cursor()
     cursor.execute('DELETE FROM inventory WHERE sku = ?', (sku,))
@@ -128,7 +142,6 @@ def delete_inventory_item(sku):
     conn.close()
 
 def delete_recipe_item(sku):
-    """Удаление только из таблицы рецептов."""
     conn = database.get_connection()
     cursor = conn.cursor()
     cursor.execute('DELETE FROM recipes WHERE sku = ?', (sku,))
@@ -136,19 +149,15 @@ def delete_recipe_item(sku):
     conn.close()
 
 def clear_empty_history():
-    """Удаляет из базы пустые или некорректные записи истории."""
     conn = database.get_connection()
     cursor = conn.cursor()
     try:
-        # Удаляем всё, где нет нормальных деталей (пустые скобки или NULL)
         cursor.execute("DELETE FROM history WHERE details = '{}' OR details IS NULL OR details = ''")
         conn.commit()
     except Exception as e:
         print(f"Ошибка очистки истории: {e}")
     finally:
         conn.close()
-
-# --- ВСПОМОГАТЕЛЬНЫЕ ---
 
 def update_recent_300(skus):
     if not skus: return
