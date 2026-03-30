@@ -135,15 +135,25 @@ class InventoryOperations:
         path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
         if path:
             res = supply_service.process_excel_supply(path)
+            
             if res["status"] == "success":
-                # Добавляем запись об Excel в историю в понятном виде
+                # Формируем детали истории строго по вашей структуре
+                history_details = {
+                    "Было": res.get("old_inventory", {}),
+                    "Изменения": res.get("changes", {}) # Тут лежат новые итоговые остатки
+                }
+                
+                # Записываем в историю
                 data_manager.add_history_record(
-                    filename=os.path.basename(path),
-                    status="Excel-приемка",
-                    details={"Изменения": {"Инфо": f"Принято {res['count']} позиций"}}
+                    filename=f"Excel: {os.path.basename(path)}",
+                    status="Приход",
+                    details=history_details
                 )
-                messagebox.showinfo("Успех", f"Принято {res['count']} позиций")
+                
+                messagebox.showinfo("Успех", f"Принято позиций: {res['count']}")
                 win.destroy()
-                self._refresh_ui()
+                
+                # Передаем обновленные данные в UI, чтобы склад сразу "позеленел"
+                self._refresh_ui(res.get("changes"))
             else: 
                 messagebox.showerror("Ошибка", res["message"])

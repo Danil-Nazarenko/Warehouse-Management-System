@@ -29,12 +29,13 @@ def add_supply(sku, amount):
         return {"status": "error", "message": str(e)}
 
 def process_excel_supply(file_path):
-    """Логика массового прихода из Excel с одним SQL-запросом."""
+    """Логика массового прихода из Excel с подготовкой данных для истории."""
     try:
-        # Читаем Excel. header=None, если в файле нет заголовков
+        # Читаем Excel. header=None, так как данные начинаются с первой строки
         df = pd.read_excel(file_path, header=None) 
         count = 0
         all_updates = {}
+        old_states = {} # Сюда сохраним то, что БЫЛО до прихода
         
         inventory = data_manager.load_json('inventory')
         recipes = data_manager.load_json('recipes')
@@ -44,14 +45,18 @@ def process_excel_supply(file_path):
                 sku = str(row.iloc[0]).strip()
                 if sku.endswith('.0'): sku = sku[:-2]
                 
-                # Обработка количества
                 qty_raw = str(row.iloc[1]).replace(',', '.')
                 qty = int(float(qty_raw))
                 
                 if sku in recipes:
+                    # Запоминаем состояние ДО (если еще не запомнили для этого SKU)
+                    if sku not in old_states:
+                        old_states[sku] = inventory.get(sku, 0)
+                    
                     current = inventory.get(sku, 0)
-                    inventory[sku] = current + qty
-                    all_updates[sku] = inventory[sku]
+                    new_val = current + qty
+                    inventory[sku] = new_val
+                    all_updates[sku] = new_val
                     count += 1
             except:
                 continue
@@ -64,7 +69,8 @@ def process_excel_supply(file_path):
         return {
             "status": "success", 
             "count": count,
-            "updated_inventory": all_updates # Здесь уже было верно
+            "changes": all_updates,    # Это "ИТОГ" (новые значения)
+            "old_inventory": old_states # Это "БЫЛО"
         }
     except Exception as e:
         return {"status": "error", "message": f"Ошибка парсинга: {e}"}

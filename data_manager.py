@@ -49,27 +49,40 @@ def load_json(key):
     return {}
 
 def get_active_skus_since(cutoff_date_str):
-    """Возвращает уникальный список SKU, активных с указанной даты (SQL-оптимизация)."""
+    """
+    Возвращает словарь со статистикой по каждому SKU за период.
+    Фиксирует начальное состояние из первой найденной записи и аккумулирует изменения.
+    """
     conn = database.get_connection()
     cursor = conn.cursor()
-    active_skus = set()
+    stats = {} # Структура: { 'sku': {'initial_was': 0, 'total_diff': 0} }
+    
     try:
-        # Запрашиваем только колонку details и только для нужных дат
-        cursor.execute('SELECT details FROM history WHERE date >= ?', (cutoff_date_str,))
+        # Сортировка от старых к новым позволяет поймать 'точку входа' объекта в период
+        cursor.execute('SELECT details FROM history WHERE date >= ? ORDER BY date ASC', (cutoff_date_str,))
         
         for row in cursor.fetchall():
             try:
                 details = json.loads(row[0])
-                # Собираем артикулы из ключей словарей "Было" и "Изменения"
-                if isinstance(details, dict):
-                    active_skus.update(details.get('Было', {}).keys())
-                    active_skus.update(details.get('Изменения', {}).keys())
+                if not isinstance(details, dict): continue
+                
+                was_map = details.get('Было', {})
+                diff_map = details.get('Изменения', {})
+
+                for sku, diff in diff_map.items():
+                    if sku not in stats:
+                        # Если артикул встречен впервые, берем его исходное значение из этой записи
+                        initial = was_map.get(sku, 0)
+                        stats[sku] = {'initial_was': initial, 'total_diff': 0}
+                    
+                    # Накапливаем сумму всех корректировок
+                    stats[sku]['total_diff'] += diff
             except:
                 continue
-        return list(active_skus)
+        return stats
     except Exception as e:
-        print(f"SQL Active SKUs Error: {e}")
-        return []
+        print(f"SQL Active SKUs Stats Error: {e}")
+        return {}
     finally:
         conn.close()
 
@@ -109,7 +122,7 @@ def update_recipes_batch(updates):
         conn.close()
 
 def add_history_record(filename, status, details):
-    """Запись в историю с лимитом 400 записей."""
+    """Запись в историю с жестким лимитом в 400 строк для поддержания лаконичности БД."""
     conn = database.get_connection()
     cursor = conn.cursor()
     try:
