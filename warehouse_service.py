@@ -16,6 +16,62 @@ def get_all_skus():
         print(f"Ошибка получения списка SKU для интерфейса: {e}")
         return []
 
+# --- НОВАЯ ФУНКЦИЯ ТОЧЕЧНОЙ ОТГРУЗКИ ---
+def add_order(sku, qty):
+    """
+    Точечная отгрузка товара или набора.
+    Учитывает составы из recipes.
+    """
+    try:
+        inventory = data_manager.load_json('inventory')
+        recipes = data_manager.load_json('recipes')
+        sku = sku.strip()
+        
+        updated_items = {}
+        old_stocks = {}
+
+        # 1. Определяем, что списывать (набор или одиночный товар)
+        if sku in recipes:
+            recipe = recipes[sku]
+            # Если "SIMPLE" — списываем сам артикул, иначе — состав
+            items_to_deduct = {sku: qty} if recipe == "SIMPLE" else {k: v * qty for k, v in recipe.items()}
+        else:
+            # Если в рецептах нет — списываем как одиночку
+            items_to_deduct = {sku: qty}
+
+        # 2. Проводим расчеты
+        for item_sku, q_needed in items_to_deduct.items():
+            old_val = inventory.get(item_sku, 0)
+            new_val = old_val - q_needed
+            
+            old_stocks[item_sku] = old_val
+            updated_items[item_sku] = new_val
+
+        # 3. Сохраняем изменения
+        data_manager.update_inventory_batch(updated_items)
+        data_manager.update_recent_300(list(updated_items.keys()))
+
+        # 4. Запись в историю
+        is_deficit = any(v < 0 for v in updated_items.values())
+        data_manager.add_history_record(
+            filename=f"Отгрузка: {sku}",
+            status="Дефицит" if is_deficit else "Готово",
+            details={
+                "Изменения": updated_items, 
+                "Было": old_stocks, 
+                "тип": "отгрузка",
+                "кол-во": qty
+            }
+        )
+        
+        return {
+            "status": "success",
+            "message": f"Отгружено: {sku} (x{qty})",
+            "updated_inventory": updated_items
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Ошибка отгрузки: {e}"}
+
 # --- ФУНКЦИЯ ЗАМЕНЫ ---
 def swap_items(sku_from, sku_to, qty):
     try:
@@ -60,7 +116,7 @@ def add_supply(sku, qty):
         inventory = data_manager.load_json('inventory')
         sku = sku.strip()
         
-        old_qty = inventory.get(sku, 0) # Фиксируем СТРОГО до изменения
+        old_qty = inventory.get(sku, 0) 
         new_qty = old_qty + qty
         
         updates = {sku: new_qty}
@@ -89,7 +145,7 @@ def report_defect(sku, qty):
         inventory = data_manager.load_json('inventory')
         sku = sku.strip()
         
-        old_qty = inventory.get(sku, 0) # Фиксируем СТРОГО до изменения
+        old_qty = inventory.get(sku, 0) 
         new_qty = old_qty - qty
         
         updates = {sku: new_qty}
@@ -112,7 +168,6 @@ def report_defect(sku, qty):
     except Exception as e:
         return {"status": "error", "message": f"Ошибка списания: {e}"}
 
-# --- ПРОЦЕССИНГ ЗАКАЗОВ ---
 # --- ПРОЦЕССИНГ ЗАКАЗОВ ---
 def process_morning_orders(filename):
     recipes = data_manager.load_json('recipes')
@@ -147,7 +202,6 @@ def process_morning_orders(filename):
     updated_items = {} 
     old_stocks = {} 
 
-    # Работаем с копией инвентаря для расчетов
     current_inv_state = inventory.copy()
 
     for order_sku, total_qty in total_file_demands.items():
@@ -156,11 +210,9 @@ def process_morning_orders(filename):
             continue
 
         recipe = recipes[order_sku]
-        # Если рецепт "SIMPLE", списываем сам артикул, иначе — ингредиенты
         items_to_deduct = {order_sku: total_qty} if recipe == "SIMPLE" else {k: v * total_qty for k, v in recipe.items()}
 
         for item, q_needed in items_to_deduct.items():
-            # Фиксируем состояние "БЫЛО" только один раз для каждого SKU
             if item not in old_stocks:
                 old_stocks[item] = current_inv_state.get(item, 0)
                 
@@ -176,11 +228,9 @@ def process_morning_orders(filename):
         processed_count += total_qty
 
     if updated_items:
-        # Массовое обновление в базе
         data_manager.update_inventory_batch(updated_items)
         data_manager.update_recent_300(list(updated_items.keys()))
         
-        # СТРОГИЙ ФОРМАТ ДАННЫХ ДЛЯ ИСТОРИИ
         history_details = {
             "Было": old_stocks,
             "Изменения": updated_items, 
@@ -191,7 +241,6 @@ def process_morning_orders(filename):
             }
         }
 
-        # Записываем в БД под именем файла заказов
         data_manager.add_history_record(
             filename=f"Заказы: {os.path.basename(filename)}",
             status="Готово" if not errors else "Дефицит",
