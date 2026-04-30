@@ -16,7 +16,50 @@ def get_all_skus():
         print(f"Ошибка получения списка SKU для интерфейса: {e}")
         return []
 
-# --- НОВАЯ ФУНКЦИЯ ТОЧЕЧНОЙ ОТГРУЗКИ ---
+# --- ФУНКЦИЯ ОТКАТА ПОСЛЕДНЕГО ДЕЙСТВИЯ ---
+def undo_last_action():
+    """
+    Восстанавливает состояние склада 'До', используя последнюю запись в истории.
+    """
+    try:
+        # 1. Загружаем историю (в SQL версии она уже отсортирована: новая в начале)
+        history = data_manager.load_json('history')
+        if not history:
+            return {"status": "error", "message": "История пуста, нечего отменять."}
+
+        # 2. Достаем самую последнюю запись (ИНДЕКС 0 для SQL)
+        last_record = history[0] 
+        details = last_record.get("details", {})
+        
+        # Проверяем наличие ключа "Было"
+        old_stocks = details.get("Было") 
+
+        if not old_stocks:
+            return {"status": "error", "message": "В последней записи нет данных 'Было' для отката."}
+
+        # 3. Возвращаем старые значения в инвентарь (в базу данных)
+        data_manager.update_inventory_batch(old_stocks)
+        
+        # Обновляем кэш последних затронутых товаров
+        data_manager.update_recent_300(list(old_stocks.keys()))
+
+        # 4. Удаляем запись из БД (специальной функцией, а не через pop)
+        if hasattr(data_manager, 'delete_last_history_record'):
+            data_manager.delete_last_history_record()
+        else:
+            # Если функции нет, работаем по старинке (только для JSON)
+            history.pop(0)
+            data_manager.save_json('history', history)
+
+        return {
+            "status": "success",
+            "message": f"Действие '{last_record.get('filename', 'Неизвестно')}' успешно отменено.",
+            "updated_inventory": old_stocks
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Ошибка при откате: {e}"}
+
+# --- ФУНКЦИЯ ТОЧЕЧНОЙ ОТГРУЗКИ ---
 def add_order(sku, qty):
     """
     Точечная отгрузка товара или набора.
@@ -33,10 +76,8 @@ def add_order(sku, qty):
         # 1. Определяем, что списывать (набор или одиночный товар)
         if sku in recipes:
             recipe = recipes[sku]
-            # Если "SIMPLE" — списываем сам артикул, иначе — состав
             items_to_deduct = {sku: qty} if recipe == "SIMPLE" else {k: v * qty for k, v in recipe.items()}
         else:
-            # Если в рецептах нет — списываем как одиночку
             items_to_deduct = {sku: qty}
 
         # 2. Проводим расчеты
@@ -94,7 +135,7 @@ def swap_items(sku_from, sku_to, qty):
         data_manager.update_inventory_batch(updates)
         data_manager.update_recent_300(list(updates.keys()))
 
-        # ЗАПИСЬ В ИСТОРИЮ (Было -> Стало)
+        # ЗАПИСЬ В ИСТОРИЮ
         data_manager.add_history_record(
             filename="Ручная замена",
             status="Успех",
@@ -107,8 +148,7 @@ def swap_items(sku_from, sku_to, qty):
             "updated_inventory": updates 
         }
     except Exception as e:
-        print(f"!!! КРИТИЧЕСКАЯ ОШИБКА SQL: {e}") 
-        return {"status": "error", "message": f"SQL Error: {str(e)}"}
+        return {"status": "error", "message": f"Ошибка замены: {str(e)}"}
     
 # --- ФУНКЦИЯ ПРИХОДА ---
 def add_supply(sku, qty):

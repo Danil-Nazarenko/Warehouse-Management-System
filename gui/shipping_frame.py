@@ -15,7 +15,7 @@ class ShippingManager:
     def _create_popup(self, title, color):
         win = ctk.CTkToplevel(self.parent)
         win.title(title)
-        win.geometry("450x650") 
+        win.geometry("450x720") # Немного увеличил высоту под новую кнопку
         win.attributes("-topmost", True)
         win.resizable(False, False)
         
@@ -25,6 +25,36 @@ class ShippingManager:
             text_color=color
         ).pack(pady=20)
         return win
+
+    def _show_errors_window(self, processed, errors):
+        err_win = ctk.CTkToplevel(self.parent)
+        err_win.title("Результаты обработки")
+        err_win.geometry("500x600")
+        err_win.attributes("-topmost", True)
+
+        ctk.CTkLabel(
+            err_win, 
+            text=f"ОБРАБОТАНО: {processed} шт.", 
+            font=("Arial", 16, "bold"),
+            text_color="#3498db"
+        ).pack(pady=15)
+
+        ctk.CTkLabel(err_win, text="СПИСОК ДЕФИЦИТА / ОШИБОК:", font=("Arial", 12, "bold"), text_color="#e74c3c").pack()
+
+        scroll = ctk.CTkScrollableFrame(err_win, width=450, height=400)
+        scroll.pack(pady=10, padx=20, fill="both", expand=True)
+
+        for err in errors:
+            ctk.CTkLabel(
+                scroll, 
+                text=err, 
+                wraplength=400, 
+                justify="left", 
+                anchor="w",
+                font=("Consolas", 11)
+            ).pack(fill="x", pady=2)
+
+        ctk.CTkButton(err_win, text="ПОНЯТНО", command=err_win.destroy).pack(pady=15)
 
     def run_morning_orders(self):
         window = self._create_popup("Загрузка / Отгрузка", "#3498db")
@@ -46,19 +76,16 @@ class ShippingManager:
         sku_entry = SmartSearchEntry(window, placeholder_text="Поиск...", width=300, height=36)
         sku_entry.pack(pady=5)
 
-        # --- 2. ВЫДЕЛЕННОЕ ПОЛЕ ДЛЯ СПИСКА (ФИКСИРОВАННОЕ) ---
-        # Это и есть то "отдельное поле", про которое ты говорил. 
-        # Оно всегда на экране, поэтому ничего не прыгает.
+        # --- 2. ВЫДЕЛЕННОЕ ПОЛЕ ДЛЯ СПИСКА ---
         results_container = ctk.CTkFrame(window, height=150, width=320, fg_color="#1e1e1e", border_width=1, border_color="#333333")
         results_container.pack(pady=5)
-        results_container.pack_propagate(False) # Запрещаем менять размер, чтобы окно не моргало
+        results_container.pack_propagate(False)
 
         suggest_scroll = ctk.CTkScrollableFrame(results_container, fg_color="transparent")
         suggest_scroll.pack(fill="both", expand=True)
 
         def on_search_update():
             query = sku_entry.internal_var.get().strip().lower()
-            # Очищаем только содержимое скролла
             for w in suggest_scroll.winfo_children():
                 w.destroy()
             
@@ -78,7 +105,7 @@ class ShippingManager:
 
         sku_entry.bind_search(on_search_update)
 
-        # --- 3. ПОЛЕ КОЛИЧЕСТВА (ЖЕСТКО ЗАКРЕПЛЕНО НИЖЕ) ---
+        # --- 3. ПОЛЕ КОЛИЧЕСТВА ---
         ctk.CTkLabel(window, text="КОЛИЧЕСТВО:", font=("Arial", 11, "bold")).pack(pady=(10, 0))
         qty_entry = OrdoEntry(window, width=300, height=36, placeholder_text="1")
         qty_entry.pack(pady=5)
@@ -99,12 +126,35 @@ class ShippingManager:
             else:
                 messagebox.showerror("Ошибка", res["message"], parent=window)
 
-        # Кнопка в самом низу
         ctk.CTkButton(
             window, text="✅ ОТГРУЗИТЬ ТОЧЕЧНО",
             fg_color="#3498db", height=50, width=250, font=("Arial", 12, "bold"),
             command=confirm_manual
         ).pack(pady=20)
+
+        # --- НОВАЯ СЕКЦИЯ ОТКАТА ---
+        ctk.CTkLabel(window, text="──────────────────────────", text_color="#333333").pack()
+        
+        undo_btn = ctk.CTkButton(
+            window, text="↩️ ОТМЕНИТЬ ПОСЛЕДНЕЕ",
+            fg_color="#e67e22", hover_color="#d35400",
+            height=40, width=250, font=("Arial", 11),
+            command=lambda: self._undo_last_action_ui(window)
+        )
+        undo_btn.pack(pady=10)
+
+    def _undo_last_action_ui(self, window):
+        """Логика нажатия кнопки отката в интерфейсе."""
+        if not messagebox.askyesno("Откат", "Отменить последнюю операцию и вернуть остатки?", parent=window):
+            return
+
+        res = warehouse_service.undo_last_action()
+        if res["status"] == "success":
+            messagebox.showinfo("Готово", res["message"])
+            window.destroy()
+            self._refresh_ui(res.get("updated_inventory"))
+        else:
+            messagebox.showerror("Ошибка", res["message"], parent=window)
 
     def _process_excel_immediately(self, window):
         path = filedialog.askopenfilename(
@@ -120,10 +170,12 @@ class ShippingManager:
                 processed = res.get('processed', 0)
                 errors = res.get('errors', [])
                 window.destroy()
+                
                 if errors:
-                    messagebox.showwarning("Результат", f"Обработано {processed} шт.\n\nДЕФИЦИТ:\n" + "\n".join(errors[:10]))
+                    self._show_errors_window(processed, errors)
                 else:
                     messagebox.showinfo("Успех", f"Файл обработан!\nВсего: {processed} шт.")
+                
                 self._refresh_ui(res.get("updated_inventory"))
             else:
                 messagebox.showerror("Ошибка файла", res["message"], parent=window)

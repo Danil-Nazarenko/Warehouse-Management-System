@@ -45,9 +45,14 @@ class OrdoEntry(ctk.CTkEntry):
             pass
 
     def _force_select_all(self):
-        self._entry.tag_add("sel", "0", "end")
-        self._entry.mark_set("insert", "end")
-        self._entry.focus_set()
+        try:
+            # Для Entry используем selection_range вместо tag_add
+            self._entry.selection_range(0, "end")
+            # Устанавливаем курсор в конец текста
+            self._entry.icursor("end")
+            self._entry.focus_set()
+        except:
+            pass
 
 class SmartSearchEntry(OrdoEntry):
     def __init__(self, master, placeholder_text="Поиск...", width=300, **kwargs):
