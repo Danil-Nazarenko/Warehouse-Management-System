@@ -12,7 +12,6 @@ CURRENT_VERSION = "2.0.0"
 
 def get_file_hash(response):
     """Опционально: если на сервере есть хэш, можно проверять тут."""
-    # Для начала просто проверим, что файл не пустой и скачался полностью
     return True
 
 def check_for_update(parent, silent=False):
@@ -21,18 +20,15 @@ def check_for_update(parent, silent=False):
     silent=True используется для автоматической проверки при старте (не беспокоит, если всё ок).
     """
     try:
-        # 1. Запрашиваем версию с GitHub
         response = requests.get(VERSION_URL, timeout=5)
         response.raise_for_status()
         online_version = response.text.strip()
 
-        # 2. Сравниваем
         if online_version == CURRENT_VERSION:
             if not silent:
                 messagebox.showinfo("Обновление", "У вас установлена актуальная версия.")
             return
 
-        # 3. Если есть новая — спрашиваем пользователя
         if messagebox.askyesno("Обновление", f"Доступна новая версия {online_version}. Обновить сейчас?"):
             perform_update(parent)
 
@@ -41,7 +37,6 @@ def check_for_update(parent, silent=False):
             messagebox.showerror("Ошибка", f"Не удалось проверить обновления: {e}")
 
 def perform_update(parent):
-    # 1. Создаем окно прогресса (чтобы юзер не думал, что всё зависло)
     progress_win = Toplevel(parent)
     progress_win.title("Обновление...")
     progress_win.geometry("300x100")
@@ -55,7 +50,7 @@ def perform_update(parent):
         r = requests.get(EXE_URL, stream=True, timeout=30)
         total_length = r.headers.get('content-length')
 
-        if total_length is None: # Нет информации о размере
+        if total_length is None:
             with open(new_exe, 'wb') as f:
                 f.write(r.content)
         else:
@@ -69,15 +64,12 @@ def perform_update(parent):
                     progress['value'] = done
                     progress_win.update()
 
-        # 2. Проверка: не скачали ли мы "пустышку" (ошибку 404 в виде текста)
-        if os.path.getsize(new_exe) < 1000000: # Если меньше 1МБ, скорее всего файл битый
+        if os.path.getsize(new_exe) < 1000000:
              raise Exception("Скачанный файл слишком мал. Возможно, ссылка неверна.")
 
         current_exe = sys.executable
         exe_name = os.path.basename(current_exe)
 
-        # 3. Ультимативный батник (с поддержкой кириллицы и принудительным закрытием)
-        # Используем cp1251 для записи, чтобы Windows корректно читал русские буквы в путях
         batch_script = f"""@echo off
 chcp 65001 > nul
 timeout /t 2 /nobreak > nul
@@ -86,12 +78,11 @@ del /f /q "{current_exe}"
 move /y "{new_exe}" "{current_exe}"
 start "" "{current_exe}"
 del "%~f0"
-""".encode('utf-8') # Либо utf-8 с chcp 65001
+""".encode('utf-8')
 
-        with open("update.bat", "wb") as f: # Пишем в бинарном режиме
+        with open("update.bat", "wb") as f:
             f.write(batch_script)
 
-        # 4. Запуск в фоновом режиме без всплывающего черного окна
         subprocess.Popen(["update.bat"], shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
         parent.destroy()
         sys.exit()

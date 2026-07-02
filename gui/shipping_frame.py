@@ -3,8 +3,6 @@ from tkinter import filedialog, messagebox
 import os
 import warehouse_service
 import data_manager
-
-# Импортируем оба компонента
 from .components import OrdoEntry, SmartSearchEntry
 
 class ShippingManager:
@@ -15,7 +13,7 @@ class ShippingManager:
     def _create_popup(self, title, color):
         win = ctk.CTkToplevel(self.parent)
         win.title(title)
-        win.geometry("450x720") # Немного увеличил высоту под новую кнопку
+        win.geometry("450x720")
         win.attributes("-topmost", True)
         win.resizable(False, False)
         
@@ -58,8 +56,7 @@ class ShippingManager:
 
     def run_morning_orders(self):
         window = self._create_popup("Загрузка / Отгрузка", "#3498db")
-        
-        # --- СЕКЦИЯ EXCEL (Верхняя) ---
+
         excel_frame = ctk.CTkFrame(window, border_width=1, border_color="#3498db")
         excel_frame.pack(fill="x", padx=30, pady=10)
         
@@ -71,12 +68,10 @@ class ShippingManager:
 
         ctk.CTkLabel(window, text="── ИЛИ ВРУЧНУЮ ──", text_color="gray", font=("Arial", 10)).pack(pady=10)
 
-        # --- 1. ПОЛЕ ВВОДА SKU ---
         ctk.CTkLabel(window, text="АРТИКУЛ (SKU):", font=("Arial", 11, "bold")).pack()
         sku_entry = SmartSearchEntry(window, placeholder_text="Поиск...", width=300, height=36)
         sku_entry.pack(pady=5)
 
-        # --- 2. ВЫДЕЛЕННОЕ ПОЛЕ ДЛЯ СПИСКА ---
         results_container = ctk.CTkFrame(window, height=150, width=320, fg_color="#1e1e1e", border_width=1, border_color="#333333")
         results_container.pack(pady=5)
         results_container.pack_propagate(False)
@@ -105,7 +100,6 @@ class ShippingManager:
 
         sku_entry.bind_search(on_search_update)
 
-        # --- 3. ПОЛЕ КОЛИЧЕСТВА ---
         ctk.CTkLabel(window, text="КОЛИЧЕСТВО:", font=("Arial", 11, "bold")).pack(pady=(10, 0))
         qty_entry = OrdoEntry(window, width=300, height=36, placeholder_text="1")
         qty_entry.pack(pady=5)
@@ -132,7 +126,6 @@ class ShippingManager:
             command=confirm_manual
         ).pack(pady=20)
 
-        # --- НОВАЯ СЕКЦИЯ ОТКАТА ---
         ctk.CTkLabel(window, text="──────────────────────────", text_color="#333333").pack()
         
         undo_btn = ctk.CTkButton(

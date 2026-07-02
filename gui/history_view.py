@@ -8,18 +8,15 @@ class HistoryView(ctk.CTkFrame):
         super().__init__(master, **kwargs)
         
         self.current_page = 1
-        self.per_page = 20  # Сколько записей на одной странице
+        self.per_page = 20
 
-        # Настройка сетки: верх (список) растет, низ (кнопки) зафиксирован
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        # 1. Область со скроллом для самих записей
         self.scroll_container = ctk.CTkScrollableFrame(self)
         self.scroll_container.grid(row=0, column=0, sticky="nsew", padx=2, pady=(2, 0))
         self.scroll_container.columnconfigure(1, weight=1)
 
-        # 2. Нижняя панель навигации
         self.nav_bar = ctk.CTkFrame(self, height=45, fg_color="transparent")
         self.nav_bar.grid(row=1, column=0, sticky="ew", pady=5)
 
@@ -36,21 +33,17 @@ class HistoryView(ctk.CTkFrame):
 
     def refresh(self):
         """Загрузка данных для текущей страницы."""
-        # Очищаем только содержимое скролл-контейнера
         for widget in self.scroll_container.winfo_children():
             widget.destroy()
 
         try:
-            # Вызываем твою функцию из data_manager
             history_data, total_count = data_manager.get_history_paginated(self.current_page, self.per_page)
         except Exception as e:
             ctk.CTkLabel(self.scroll_container, text=f"Ошибка БД: {e}").grid(row=0, column=0)
             return
 
-        # Считаем страницы
         total_pages = math.ceil(total_count / self.per_page) if total_count > 0 else 1
-        
-        # Обновляем UI навигации
+
         self.page_info.configure(text=f"Страница {self.current_page} из {total_pages}")
         self.btn_prev.configure(state="normal" if self.current_page > 1 else "disabled")
         self.btn_next.configure(state="normal" if self.current_page < total_pages else "disabled")
@@ -59,15 +52,12 @@ class HistoryView(ctk.CTkFrame):
             ctk.CTkLabel(self.scroll_container, text="История пуста", font=("Arial", 14, "italic")).grid(row=0, column=0, pady=20)
             return
 
-        # Шапка таблицы
         header_font = ("Arial", 12, "bold")
         ctk.CTkLabel(self.scroll_container, text="Дата и время", font=header_font).grid(row=0, column=0, padx=10, pady=5, sticky="w")
         ctk.CTkLabel(self.scroll_container, text="Событие (нажмите для деталей)", font=header_font).grid(row=0, column=1, padx=10, pady=5, sticky="w")
 
-        # Список записей
         for i, entry in enumerate(history_data, start=1):
             details = entry.get('details', {})
-            # Небольшой фильтр, как у тебя и было
             if not entry.get('date') or not entry.get('filename') or not details:
                 continue
 
@@ -92,7 +82,7 @@ class HistoryView(ctk.CTkFrame):
     def next_page(self):
         self.current_page += 1
         self.refresh()
-        self.scroll_container._parent_canvas.yview_moveto(0) # Вверх страницы
+        self.scroll_container._parent_canvas.yview_moveto(0)
 
     def prev_page(self):
         if self.current_page > 1:
@@ -105,15 +95,12 @@ class HistoryView(ctk.CTkFrame):
         raw_details = entry.get('details', {})
         details = json.loads(raw_details) if isinstance(raw_details, str) else raw_details
 
-        # Подготовка данных
         changes = details.get("Изменения", {})
         old_values = details.get("Было", {})
-        
-        # Если структура простая, превращаем её в словарь изменений
+ 
         if not changes and isinstance(details, dict):
             changes = {k: v for k, v in details.items() if k not in ["статистика", "тип"]}
 
-        # Параметры внутренней пагинации
         items_per_page = 50 
         all_skus = list(changes.keys())
         total_items = len(all_skus)
@@ -124,21 +111,17 @@ class HistoryView(ctk.CTkFrame):
         detail_window.geometry("850x700")
         detail_window.attributes("-topmost", True)
 
-        # Состояние текущей страницы окна деталей
         detail_window.current_page = 1
 
         ctk.CTkLabel(detail_window, text=f"Движение товара: {entry.get('filename')}", font=("Arial", 16, "bold")).pack(pady=10)
-        
-        # Контейнер для списка
+
         list_frame = ctk.CTkScrollableFrame(detail_window)
         list_frame.pack(fill="both", expand=True, padx=15, pady=(0, 10))
 
-        # Панель навигации внутри окна деталей
         nav_frame = ctk.CTkFrame(detail_window, fg_color="transparent")
         nav_frame.pack(fill="x", pady=5)
 
         def render_page():
-            # Очистка предыдущих строк
             for widget in list_frame.winfo_children():
                 widget.destroy()
 
@@ -146,7 +129,6 @@ class HistoryView(ctk.CTkFrame):
                 ctk.CTkLabel(list_frame, text="Нет данных об изменениях").pack(pady=20)
                 return
 
-            # Шапка (отрисовываем заново на каждой странице для наглядности)
             h_frame = ctk.CTkFrame(list_frame, fg_color="gray30")
             h_frame.pack(fill="x", pady=5)
             h_frame.columnconfigure(0, weight=1)
@@ -155,7 +137,6 @@ class HistoryView(ctk.CTkFrame):
             ctk.CTkLabel(h_frame, text="ИЗМ.", font=("Arial", 10, "bold"), width=70).grid(row=0, column=2, padx=5)
             ctk.CTkLabel(h_frame, text="ИТОГ", font=("Arial", 10, "bold"), width=70).grid(row=0, column=3, padx=10)
 
-            # Срез данных для текущей страницы
             start = (detail_window.current_page - 1) * items_per_page
             end = start + items_per_page
             page_items = all_skus[start:end]
@@ -194,7 +175,6 @@ class HistoryView(ctk.CTkFrame):
 
                 ctk.CTkFrame(list_frame, height=1, fg_color="gray25").pack(fill="x", padx=5)
 
-            # Обновление текста кнопок
             page_label.configure(text=f"Позиции {start+1}-{min(end, total_items)} из {total_items} (Стр. {detail_window.current_page}/{total_pages})")
             btn_prev_det.configure(state="normal" if detail_window.current_page > 1 else "disabled")
             btn_next_det.configure(state="normal" if detail_window.current_page < total_pages else "disabled")
@@ -204,7 +184,6 @@ class HistoryView(ctk.CTkFrame):
             render_page()
             list_frame._parent_canvas.yview_moveto(0)
 
-        # Элементы управления в окне деталей
         btn_prev_det = ctk.CTkButton(nav_frame, text="⬅", width=40, command=lambda: change_page(-1))
         btn_prev_det.pack(side="left", padx=10)
 
@@ -214,7 +193,6 @@ class HistoryView(ctk.CTkFrame):
         btn_next_det = ctk.CTkButton(nav_frame, text="➡", width=40, command=lambda: change_page(1))
         btn_next_det.pack(side="right", padx=10)
 
-        # Первый запуск рендера
         render_page()
 
         ctk.CTkButton(detail_window, text="Закрыть", command=detail_window.destroy).pack(pady=10)

@@ -3,15 +3,11 @@ import customtkinter as ctk
 class OrdoEntry(ctk.CTkEntry):
     def __init__(self, master, **kwargs):
         super().__init__(master, **kwargs)
-        # Привязываем событие ко всему окну, но только когда фокус на этом поле
-        # Это самый мощный способ заставить хоткеи работать
         self._entry.bind("<KeyPress>", self._check_hotkeys)
 
     def _check_hotkeys(self, event):
-        # Проверяем, нажат ли Control (маска 4)
         ctrl_pressed = (event.state & 0x4) != 0
-        
-        # Физические коды клавиш (не зависят от языка): 86=V, 67=C, 65=A
+
         if ctrl_pressed:
             if event.keycode == 86 or event.keysym.lower() in ('v', 'м'):
                 self._force_paste()
@@ -25,10 +21,8 @@ class OrdoEntry(ctk.CTkEntry):
 
     def _force_paste(self):
         try:
-            # Берем текст из буфера обмена через встроенный метод tkinter
             text = self.focus_get().clipboard_get()
             if text:
-                # Если текст выделен — заменяем его
                 if self._entry.selection_present():
                     self._entry.delete("sel.first", "sel.last")
                 self._entry.insert("insert", text)
@@ -46,9 +40,7 @@ class OrdoEntry(ctk.CTkEntry):
 
     def _force_select_all(self):
         try:
-            # Для Entry используем selection_range вместо tag_add
             self._entry.selection_range(0, "end")
-            # Устанавливаем курсор в конец текста
             self._entry.icursor("end")
             self._entry.focus_set()
         except:
@@ -56,7 +48,6 @@ class OrdoEntry(ctk.CTkEntry):
 
 class SmartSearchEntry(OrdoEntry):
     def __init__(self, master, placeholder_text="Поиск...", width=300, **kwargs):
-        # Извлекаем переменную поиска, если она передана
         self.internal_var = kwargs.get("textvariable") or ctk.StringVar()
         if "textvariable" in kwargs:
             del kwargs["textvariable"]

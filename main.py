@@ -1,41 +1,32 @@
 import customtkinter as ctk
 import database 
 
-# Предварительные настройки UI до инициализации основного класса
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
 class WarehouseApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        
-        # Минимальная базовая настройка
+
         database.init_db()
         self.title("Ordo v2.1.0")
         self.geometry("1100x700")
-        
-        # Переменные поиска
+
         self.search_var = ctk.StringVar()
-        # УДАЛЕНО: self._trace_id = self.search_var.trace_add("write", self.universal_search_handler)
-        # Мы больше не вешаем глобальный следящий обработчик, чтобы избежать тормозов.
         
         self.current_view = None
         
-        # Кэш для менеджеров
         self._inv_ops = None
         self._shipping = None
 
-        # UI Скелет
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
         self.setup_sidebar()
 
-        # Основной контейнер
         self.main_frame = ctk.CTkFrame(self, corner_radius=10)
         self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
-        
-        # Запускаем первый экран
+
         self.show_inventory_ui()
 
     @property
@@ -60,7 +51,6 @@ class WarehouseApp(ctk.CTk):
                                   font=ctk.CTkFont(size=28, weight="bold"))
         logo_label.grid(row=0, column=0, padx=20, pady=30)
 
-        # Кнопки меню
         self.create_sidebar_button("📊 Склад", self.show_inventory_ui, 1)
         self.create_sidebar_button("🔥 Актуальное", self.show_active_ui, 2)
         self.create_sidebar_button("📑 Загрузка", lambda: self.shipping.run_morning_orders(), 3)
@@ -88,7 +78,6 @@ class WarehouseApp(ctk.CTk):
     def show_inventory_ui(self):
         from gui.inventory_frame import InventoryFrame
         self.clear_main_frame()
-        # Передаем переменную. InventoryFrame сам свяжет её через SmartSearchEntry
         self.current_view = InventoryFrame(self.main_frame, self.search_var, self.copy_to_clipboard)
         self.current_view.pack(fill="both", expand=True)
 

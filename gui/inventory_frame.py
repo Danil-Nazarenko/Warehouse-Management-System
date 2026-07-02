@@ -17,8 +17,7 @@ class InventoryFrame(ctk.CTkFrame):
         
         self.current_page = 0
         self.items_per_page = 50
-        
-        # --- UI СЕКЦИЯ ---
+
         header_frame = ctk.CTkFrame(self, fg_color="transparent")
         header_frame.pack(fill="x", pady=(20, 10), padx=20)
         
@@ -77,12 +76,10 @@ class InventoryFrame(ctk.CTkFrame):
         
         if sku in self._row_widgets:
             widgets = self._row_widgets[sku]
-            
-            # Обновляем текст в поле
+
             widgets["entry"].delete(0, 'end')
             widgets["entry"].insert(0, str(new_qty))
-            
-            # Статическая проверка цвета карточки
+
             card_color = "#3b1e1e" if new_qty < 5 else "#2b2b2b"
             widgets["row"].configure(fg_color=card_color)
 

@@ -3,21 +3,16 @@ import pandas as pd
 
 def report_defect(sku, amount, force=False):
     """Списание брака через SQL с возвратом нового остатка. Разрешен уход в минус."""
-    # Загружаем текущий срез из SQL
     inventory = data_manager.load_json('inventory')
     sku = sku.strip()
-    
-    # Если товара нет в инвентаре, начинаем расчет от нуля
+
     current_qty = inventory.get(sku, 0)
 
-    # Считаем новый остаток (просто вычитаем, проверки на минус удалены)
     new_qty = current_qty - amount
-    
-    # ПИШЕМ В SQL
+
     data_manager.update_inventory_batch({sku: new_qty})
     data_manager.update_recent_300([sku])
     
-    # ВОЗВРАЩАЕМ ПРАВИЛЬНЫЙ СЛОВАРЬ ДЛЯ UI
     return {
         "status": "success", 
         "message": f"Брак по {sku} списан. Остаток: {new_qty}",
@@ -38,16 +33,14 @@ def process_excel_waste(file_path):
             try:
                 sku = str(row.iloc[0]).strip()
                 qty = int(float(str(row.iloc[1]).replace(',', '.')))
-                
-                # Получаем текущий остаток или 0
+
                 current = inventory.get(sku, 0)
                 inventory[sku] = current - qty
                 all_updates[sku] = inventory[sku]
                 count += 1
             except:
                 continue
-        
-        # ОДИН пакетный запрос к базе для всех строк Excel
+
         if all_updates:
             data_manager.update_inventory_batch(all_updates)
             data_manager.update_recent_300(list(all_updates.keys()))

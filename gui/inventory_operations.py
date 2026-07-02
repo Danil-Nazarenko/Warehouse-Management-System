@@ -4,7 +4,7 @@ import os
 import supply_service
 import waste_service
 import warehouse_service
-import data_manager  # Для прямой работы с историей без дублей
+import data_manager
 
 from .components import OrdoEntry
 
@@ -16,23 +16,19 @@ class InventoryOperations:
     def _execute_operation(self, window, service_func, sku, qty, success_msg="Готово", op_type="Действие"):
         sku = sku.strip()
         if sku and qty.isdigit():
-            # Запоминаем состояние склада ДО операции
             inv_before = data_manager.load_json('inventory')
             old_qty = inv_before.get(sku, 0)
             
             res = service_func(sku, int(qty))
             if res["status"] == "success":
-                # Получаем новое состояние после операции
                 updated = res.get("updated_inventory", {})
                 new_qty = updated.get(sku, old_qty)
-                
-                # Формируем правильный словарь для таблицы
+
                 history_details = {
                     "Было": {sku: old_qty},
                     "Изменения": {sku: new_qty}
                 }
-                
-                # Единственная запись в историю — структурированная
+
                 data_manager.add_history_record(
                     filename=f"{op_type}: {sku}",
                     status="Успешно",
@@ -89,8 +85,7 @@ class InventoryOperations:
                         "Было": {s_from: old_f, s_to: old_t},
                         "Изменения": {s_from: updated.get(s_from, 0), s_to: updated.get(s_to, 0)}
                     }
-                    
-                    # Записываем только структурированную историю
+
                     data_manager.add_history_record(
                         filename=f"Замена: {s_from} -> {s_to}",
                         status="Готово",
@@ -137,13 +132,11 @@ class InventoryOperations:
             res = supply_service.process_excel_supply(path)
             
             if res["status"] == "success":
-                # Формируем детали истории строго по вашей структуре
                 history_details = {
                     "Было": res.get("old_inventory", {}),
-                    "Изменения": res.get("changes", {}) # Тут лежат новые итоговые остатки
+                    "Изменения": res.get("changes", {})
                 }
-                
-                # Записываем в историю
+
                 data_manager.add_history_record(
                     filename=f"Excel: {os.path.basename(path)}",
                     status="Приход",
@@ -152,8 +145,7 @@ class InventoryOperations:
                 
                 messagebox.showinfo("Успех", f"Принято позиций: {res['count']}")
                 win.destroy()
-                
-                # Передаем обновленные данные в UI, чтобы склад сразу "позеленел"
+
                 self._refresh_ui(res.get("changes"))
             else: 
                 messagebox.showerror("Ошибка", res["message"])

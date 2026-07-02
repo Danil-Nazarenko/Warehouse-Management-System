@@ -2,7 +2,6 @@ import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import catalog_service
 import data_manager
-# Импортируем оба наших исправленных класса
 from .components import SmartSearchEntry, OrdoEntry 
 
 class CatalogFrame(ctk.CTkFrame):
@@ -12,17 +11,14 @@ class CatalogFrame(ctk.CTkFrame):
         self.parent_app = parent_app  
         self.temp_content = {}        
 
-        # Настройки пагинации
         self.current_page = 0
         self.items_per_page = 50
 
-        # --- ВЕРХНЯЯ ПАНЕЛЬ ---
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", pady=20, padx=20)
         
         ctk.CTkLabel(header, text="📦 Каталог", font=("Arial", 24, "bold")).pack(side="left")
 
-        # Основной поиск уже был на SmartSearchEntry — тут всё ок
         self.search_entry = SmartSearchEntry(
             header, 
             placeholder_text="🔍 Поиск в каталоге (от 3-х симв.)...", 
@@ -42,11 +38,9 @@ class CatalogFrame(ctk.CTkFrame):
         ctk.CTkButton(btn_frame, text="+ Добавить", fg_color="#3b8ed0", width=120,
                       command=lambda: self.show_constructor_window()).pack(side="left", padx=5)
 
-        # --- СПИСОК ТОВАРОВ ---
         self.catalog_scroll = ctk.CTkScrollableFrame(self)
         self.catalog_scroll.pack(fill="both", expand=True, padx=20, pady=(0, 10))
-        
-        # --- БЛОК ПАГИНАЦИИ ---
+
         self.pagination_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.pagination_frame.pack(fill="x", padx=20, pady=(0, 20))
         
@@ -145,7 +139,6 @@ class CatalogFrame(ctk.CTkFrame):
 
         self.temp_content = catalog_service.get_item_content(edit_sku) if edit_sku else {}
 
-        # Поле SKU — МЕНЯЕМ НА OrdoEntry
         top_f = ctk.CTkFrame(window, fg_color="transparent")
         top_f.pack(fill="x", padx=15, pady=(10, 5))
         ctk.CTkLabel(top_f, text="SKU:", font=("Arial", 12, "bold")).pack(side="left")
@@ -154,16 +147,13 @@ class CatalogFrame(ctk.CTkFrame):
         if edit_sku: 
             sku_entry.insert(0, edit_sku)
 
-        # Панель добавления детали
         add_f = ctk.CTkFrame(window, fg_color="#2b2b2b", height=45)
         add_f.pack(fill="x", padx=15, pady=5)
         
         c_search_var = ctk.StringVar()
-        # Поиск детали — МЕНЯЕМ НА OrdoEntry
         search_entry = OrdoEntry(add_f, placeholder_text="Поиск детали...", width=240, height=28, textvariable=c_search_var)
         search_entry.grid(row=0, column=0, padx=(10, 5), pady=8)
-        
-        # Количество — МЕНЯЕМ НА OrdoEntry
+
         qty_entry = OrdoEntry(add_f, width=40, height=28)
         qty_entry.insert(0, "1")
         qty_entry.grid(row=0, column=1, padx=5)

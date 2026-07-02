@@ -11,11 +11,9 @@ def get_history_paginated(page, per_page=20):
     совместимыми с HistoryView.
     """
     offset = (page - 1) * per_page
-    # Используем database.get_connection, как в остальном файле
     conn = database.get_connection() 
     cursor = conn.cursor()
     
-    # ВАЖНО: выбираем date как r[0], чтобы интерфейс его видел
     cursor.execute("""
         SELECT date, filename, status, details, id 
         FROM history 
@@ -50,8 +48,6 @@ def get_base_path():
 BASE_DIR = get_base_path()
 DB_PATH = os.path.join(BASE_DIR, 'ordo_v2.db')
 
-# --- ПРЯМАЯ РАБОТА С SQL ---
-
 def load_json(key):
     """Быстрая загрузка данных через SQL. Поддерживает все ключи приложения."""
     conn = database.get_connection()
@@ -76,7 +72,6 @@ def load_json(key):
             return [row[0] for row in cursor.fetchall()]
         
         elif key == 'history':
-            # Добавлена выборка id для корректной работы лимитов и поиска
             cursor.execute('SELECT date, filename, status, details, id FROM history ORDER BY id DESC')
             return [{'date': r[0], 'filename': r[1], 'status': r[2], 'details': json.loads(r[3]), 'id': r[4]} for r in cursor.fetchall()]
     except Exception as e:
@@ -85,13 +80,11 @@ def load_json(key):
         conn.close()
     return {}
 
-# --- НОВАЯ ФУНКЦИЯ ДЛЯ ОТКАТА ---
 def delete_last_history_record():
     """Удаляет самую последнюю запись из таблицы истории."""
     conn = database.get_connection()
     cursor = conn.cursor()
     try:
-        # Находим максимальный ID (последнюю запись) и удаляем её
         cursor.execute('DELETE FROM history WHERE id = (SELECT MAX(id) FROM history)')
         conn.commit()
     except Exception as e:
@@ -107,7 +100,7 @@ def get_active_skus_since(cutoff_date_str):
     """
     conn = database.get_connection()
     cursor = conn.cursor()
-    stats = {} # Структура: { 'sku': {'initial_was': 0, 'total_diff': 0} }
+    stats = {}
     
     try:
         cursor.execute('SELECT details FROM history WHERE date >= ? ORDER BY date ASC', (cutoff_date_str,))

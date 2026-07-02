@@ -3,39 +3,33 @@ import data_manager
 import pandas as pd
 from datetime import datetime, timedelta
 from tkinter import filedialog, messagebox
-# Импортируем ваш кастомный поиск
 from .components import SmartSearchEntry 
 
 class ActiveInventoryView(ctk.CTkFrame):
     def __init__(self, parent):
         super().__init__(parent, fg_color="transparent")
-        
-        # Состояние пагинации и фильтров
+
         self.current_filter = "all" 
         self.threshold = 20          
         self.days_lookback = 10 
         self.items_per_page = 50
         self.current_page = 0
         self.filtered_data = [] 
-        
-        # --- HEADER ---
+
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=30, pady=(20, 10))
         
         ctk.CTkLabel(header, text="📊 МОНИТОРИНГ АКТУАЛЬНОГО", 
                      font=("Arial", 22, "bold"), text_color="#3498db").pack(side="left")
-        
-        # КНОПКА ЭКСПОРТА (вместо обновления)
+
         self.btn_export = ctk.CTkButton(header, text="📥 ЭКСПОРТ EXCEL", width=140, 
                                          fg_color="#27ae60", hover_color="#219150",
                                          font=("Arial", 12, "bold"), command=self.export_to_excel)
         self.btn_export.pack(side="right")
 
-        # --- ДВУХСТРОЧНЫЙ CONTROL PANEL ---
         self.ctrl_panel = ctk.CTkFrame(self, fg_color="#2b2b2b", corner_radius=8)
         self.ctrl_panel.pack(fill="x", padx=30, pady=5)
-        
-        # Первая строка: Кнопки фильтров + ПОИСК
+
         top_row = ctk.CTkFrame(self.ctrl_panel, fg_color="transparent")
         top_row.pack(fill="x", padx=10, pady=(10, 5))
         
@@ -54,12 +48,10 @@ class ActiveInventoryView(ctk.CTkFrame):
                                       command=lambda: self.set_filter("zero"))
         self.btn_zero.pack(side="left", padx=5)
 
-        # ПОИСК
         self.search_entry = SmartSearchEntry(top_row, placeholder_text="Поиск по артикулу...", width=250)
         self.search_entry.pack(side="right", padx=5)
         self.search_entry.bind_search(self.full_reload) 
         
-        # Вторая строка: Параметры периода, порога и статистика
         bottom_row = ctk.CTkFrame(self.ctrl_panel, fg_color="transparent")
         bottom_row.pack(fill="x", padx=10, pady=(5, 10))
 
@@ -79,7 +71,6 @@ class ActiveInventoryView(ctk.CTkFrame):
         self.stats_label = ctk.CTkLabel(bottom_row, text="Показано: 0", font=("Arial", 11), text_color="gray")
         self.stats_label.pack(side="right", padx=15)
 
-        # --- TABLE HEADER ---
         self.table_header = ctk.CTkFrame(self, fg_color="#3d3d3d", height=35, corner_radius=4)
         self.table_header.pack(fill="x", padx=30, pady=(10, 0))
         
@@ -88,11 +79,9 @@ class ActiveInventoryView(ctk.CTkFrame):
         ctk.CTkLabel(self.table_header, text="ИЗМЕНЕНИЯ", width=120, anchor="w").pack(side="left")
         ctk.CTkLabel(self.table_header, text="ТЕКУЩИЙ", width=150, anchor="w").pack(side="left")
 
-        # --- SCROLLABLE CONTENT ---
         self.scroll_frame = ctk.CTkScrollableFrame(self, fg_color="#2b2b2b", corner_radius=10)
         self.scroll_frame.pack(fill="both", expand=True, padx=30, pady=(5, 5))
-        
-        # --- PAGINATION FOOTER ---
+ 
         self.pagination_frame = ctk.CTkFrame(self, fg_color="transparent", height=40)
         self.pagination_frame.pack(fill="x", padx=30, pady=(5, 15))
         
@@ -113,12 +102,10 @@ class ActiveInventoryView(ctk.CTkFrame):
         if not self.filtered_data:
             messagebox.showwarning("Экспорт", "Нет данных для экспорта!")
             return
-        
-        # Подготовка данных для DataFrame
+
         columns = ["Артикул", "Было (на начало периода)", "Изменение за период", "Текущий остаток"]
         df = pd.DataFrame(self.filtered_data, columns=columns)
-        
-        # Имя файла по умолчанию с датой и текущим фильтром
+
         date_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
         default_name = f"Inventory_Report_{self.current_filter}_{date_str}.xlsx"
         
